@@ -10,6 +10,19 @@ EXCEL_FILE = "ranking_engajamento.xlsx"
 CSV_FILE = "ranking_engajamento_com_urls.csv"
 STORAGE_STATE = Path("linkedin_state.json")
 
+def obter_pasta_area_trabalho():
+    """
+    Retorna a pasta da Área de Trabalho (Desktop) com fallback seguro.
+    """
+    desktop_padrao = Path.home() / "Desktop"
+    desktop_onedrive = Path.home() / "OneDrive" / "Desktop"
+
+    if desktop_padrao.exists():
+        return desktop_padrao
+    if desktop_onedrive.exists():
+        return desktop_onedrive
+    return Path.cwd()
+
 def realizar_login(page, context, url_destino):
     precisa_logar = False
     
@@ -203,12 +216,13 @@ def salvar_relatorio_excel(ranking_engajamento):
     if dados_finais:
         df = pd.DataFrame(dados_finais)
         df = df.sort_values(by="Engajamento_Total", ascending=False)
+        caminho_excel = obter_pasta_area_trabalho() / EXCEL_FILE
         
         # Aqui acontece a mágica do Excel usando o motor openpyxl
-        df.to_excel(EXCEL_FILE, index=False, engine='openpyxl')
+        df.to_excel(caminho_excel, index=False, engine='openpyxl')
         
         print(f"✅ SUCESSO TOTAL! {len(dados_finais)} pessoas diferentes estão no ranking.")
-        print(f"📁 Relatório completo salvo em formato Excel: {EXCEL_FILE}")
+        print(f"📁 Relatório completo salvo em formato Excel: {caminho_excel}")
     else:
         print("⚠️ Nenhum dado de engajamento foi coletado.")
 
