@@ -24,15 +24,17 @@ Cada linha representa uma pessoa com:
 
 ## Instalação (passo a passo)
 
-No terminal, dentro da pasta do projeto:
+No terminal, dentro da pasta do projeto: (pesquise no windows um dos 3: PowerShell, CMD, Terminal )
 
 ```bash
 python -m venv .venv
 ```
 
-No Windows (PowerShell, ):
+e ache a pasta do projeto (ex: se a pasta do projeto estiver na pasta downloads: (cd downloads/scrap)
 
-Instale as dependências:
+### Instale as dependências:
+
+intale o Pyhton (pode ser na store do windows ou no google)
 
 ```bash
 pip install playwright pandas openpyxl
@@ -41,26 +43,39 @@ python -m playwright install
 
 ## Como executar
 
-Com o ambiente virtual ativo, rode:
+Com o ambiente virtual ativo, rode (PowerShell, CMD, Terminal):
 
 ```bash
 python app.py
 ```
 
+## Estrutura do projeto
+
+- `app.py`: ponto de entrada da aplicacao.
+- `ui/app_gui.py`: toda a interface grafica (telas e botoes).
+- `scraper/linkedin.py`: toda a logica de scraping do LinkedIn.
+
+## Interface grafica
+
+Agora o projeto abre uma tela com os aplicativos.
+
+- **LinkedIn**: disponivel
+- **Instagram**: em breve
+- **Facebook**: em breve
+
 ## Tutorial de uso (simples)
 
-1. O script abre o Chrome automaticamente.
-2. Se pedir login, faça login no LinkedIn na janela aberta.
-3. Vá para o feed de posts da empresa.
-4. Abra a janela de **reações** de um post.
-5. Volte ao terminal e aperte **Enter** para coletar.
-6. O script pergunta se quer coletar os **comentários** daquele post.
-   - Aperte **Enter** para coletar comentários.
-   - Digite `n` para pular comentários.
-7. Repita para quantos posts quiser.
-8. Quando terminar, digite `sair` no terminal.
+1. Abra o app com `python app.py`.
+2. Na tela de aplicativos, clique em **LinkedIn**.
+3. Clique em **Comecar** para abrir o Chrome.
+4. Se pedir login, faça login no LinkedIn no Chrome.
+5. Quando o feed estiver pronto, clique em **Confirmar** na interface.
+6. Abra a janela de **reacoes** de um post no LinkedIn.
+7. Clique em **Confirmar** para coletar esse post.
+8. Repita para quantos posts quiser.
+9. Quando terminar, clique em **Sair** na interface.
 
-Pronto: os arquivos CSV e Excel serão gerados na pasta do projeto.
+Pronto: os arquivos CSV e Excel serao gerados na pasta do projeto.
 
 ## Dicas rápidas
 
@@ -70,6 +85,7 @@ Pronto: os arquivos CSV e Excel serão gerados na pasta do projeto.
 
 ## Problemas comuns
 
-- **`ModuleNotFoundError`**: ative o ambiente virtual e rode `pip install playwright pandas openpyxl`.
+- `**ModuleNotFoundError`**: ative o ambiente virtual e rode `pip install playwright pandas openpyxl`.
 - **Erro relacionado ao Playwright/navegador**: rode `python -m playwright install`.
 - **Excel não abre**: feche o arquivo `.xlsx` se ele já estiver aberto durante nova geração.
+
