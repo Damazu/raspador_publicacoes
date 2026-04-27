@@ -1,0 +1,210 @@
+import tkinter as tk
+from tkinter import messagebox, scrolledtext
+
+from scraper.linkedin import LinkedInRunner
+
+
+class AppGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Central de Raspadores")
+        self.root.geometry("880x560")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.runner = LinkedInRunner(
+            log_callback=self.log,
+            waiting_callback=self.show_waiting_message,
+            finished_callback=self.on_runner_finished,
+        )
+
+        self.main_frame = tk.Frame(root, padx=20, pady=20)
+        self.linkedin_frame = tk.Frame(root, padx=20, pady=20)
+        self.waiting_var = tk.StringVar(value="Clique em 'Comecar' para abrir o LinkedIn.")
+
+        self._build_main_page()
+        self._build_linkedin_page()
+        self.show_main_page()
+
+    def _build_main_page(self):
+        tk.Label(self.main_frame, text="Aplicativos", font=("Segoe UI", 18, "bold")).pack(anchor="w")
+        tk.Label(
+            self.main_frame,
+            text="Escolha qual rede social deseja automatizar.",
+            font=("Segoe UI", 11),
+        ).pack(anchor="w", pady=(4, 20))
+
+        cards = tk.Frame(self.main_frame)
+        cards.pack(fill="x")
+
+        tk.Button(
+            cards,
+            text="LinkedIn\nDisponivel",
+            width=22,
+            height=5,
+            command=self.show_linkedin_page,
+            bg="#0A66C2",
+            fg="white",
+            font=("Segoe UI", 11, "bold"),
+        ).grid(row=0, column=0, padx=(0, 14), pady=8)
+
+        tk.Button(
+            cards,
+            text="Instagram\nEm breve",
+            width=22,
+            height=5,
+            state="disabled",
+            font=("Segoe UI", 11),
+        ).grid(row=0, column=1, padx=14, pady=8)
+
+        tk.Button(
+            cards,
+            text="Facebook\nEm breve",
+            width=22,
+            height=5,
+            state="disabled",
+            font=("Segoe UI", 11),
+        ).grid(row=0, column=2, padx=14, pady=8)
+
+    def _build_linkedin_page(self):
+        top = tk.Frame(self.linkedin_frame)
+        top.pack(fill="x")
+
+        tk.Button(top, text="Voltar", command=self.show_main_page).pack(side="left")
+        tk.Label(top, text="LinkedIn - Coleta de Engajamento", font=("Segoe UI", 15, "bold")).pack(
+            side="left", padx=12
+        )
+
+        tk.Label(
+            self.linkedin_frame,
+            textvariable=self.waiting_var,
+            font=("Segoe UI", 10, "italic"),
+            justify="left",
+            anchor="w",
+            wraplength=820,
+        ).pack(fill="x", pady=(16, 8))
+
+        botoes = tk.Frame(self.linkedin_frame)
+        botoes.pack(fill="x", pady=(4, 10))
+
+        self.btn_comecar = tk.Button(
+            botoes,
+            text="Comecar",
+            width=16,
+            command=self.start_linkedin,
+            bg="#1A7F37",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+        )
+        self.btn_comecar.pack(side="left")
+
+        self.btn_confirmar = tk.Button(
+            botoes,
+            text="Confirmar",
+            width=16,
+            command=self.confirm_step,
+            state="disabled",
+            bg="#2F81F7",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+        )
+        self.btn_confirmar.pack(side="left", padx=12)
+
+        self.btn_sair = tk.Button(
+            botoes,
+            text="Sair",
+            width=16,
+            command=self.stop_linkedin,
+            state="disabled",
+            bg="#CF222E",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+        )
+        self.btn_sair.pack(side="left")
+
+        self.log_box = scrolledtext.ScrolledText(
+            self.linkedin_frame,
+            height=20,
+            font=("Consolas", 10),
+            state="disabled",
+        )
+        self.log_box.tag_configure("lifecycle", foreground="#1A7F37")
+        self.log_box.tag_configure("collect", foreground="#0969DA")
+        self.log_box.tag_configure("error", foreground="#CF222E")
+        self.log_box.pack(fill="both", expand=True)
+
+    def show_main_page(self):
+        self.linkedin_frame.pack_forget()
+        self.main_frame.pack(fill="both", expand=True)
+
+    def show_linkedin_page(self):
+        self.main_frame.pack_forget()
+        self.linkedin_frame.pack(fill="both", expand=True)
+
+    def start_linkedin(self):
+        if self.runner.running:
+            return
+        self.log_box.configure(state="normal")
+        self.log_box.delete("1.0", tk.END)
+        self.log_box.configure(state="disabled")
+        self.waiting_var.set("Iniciando automacao e abrindo o Chrome...")
+        self.runner.start()
+        self.btn_comecar.configure(state="disabled")
+        self.btn_confirmar.configure(state="normal")
+        self.btn_sair.configure(state="normal")
+
+    def confirm_step(self):
+        if self.runner.running:
+            self.runner.confirm()
+
+    def stop_linkedin(self):
+        if not self.runner.running:
+            return
+        if messagebox.askyesno("Encerrar coleta", "Deseja sair e finalizar a coleta agora?"):
+            self.runner.stop()
+            self.waiting_var.set("Encerrando processo...")
+
+    def show_waiting_message(self, message):
+        self.root.after(0, lambda: self.waiting_var.set(message))
+
+    def on_runner_finished(self):
+        def _finish():
+            self.waiting_var.set("Processo finalizado.")
+            self.btn_comecar.configure(state="normal")
+            self.btn_confirmar.configure(state="disabled")
+            self.btn_sair.configure(state="disabled")
+
+        self.root.after(0, _finish)
+
+    @staticmethod
+    def _infer_log_tag(message):
+        text = (message or "").strip()
+        if text.upper().startswith("ERRO:") or text.startswith("Erro inesperado"):
+            return "error"
+        prefixes_lifecycle = (
+            "Acessando:",
+            "LinkedIn pediu login",
+            "Coleta iniciada",
+            "Finalizando coleta",
+            "SUCESSO:",
+            "Arquivos gerados:",
+            "Nenhum dado de engajamento",
+        )
+        if any(text.startswith(p) for p in prefixes_lifecycle):
+            return "lifecycle"
+        return "collect"
+
+    def log(self, message, tag=None):
+        chosen = tag if tag in ("lifecycle", "collect", "error") else self._infer_log_tag(message)
+
+        def _append():
+            self.log_box.configure(state="normal")
+            self.log_box.insert(tk.END, f"{message}\n", (chosen,))
+            self.log_box.see(tk.END)
+            self.log_box.configure(state="disabled")
+
+        self.root.after(0, _append)
+
+    def on_close(self):
+        if self.runner.running:
+            self.runner.stop()
+        self.root.destroy()
