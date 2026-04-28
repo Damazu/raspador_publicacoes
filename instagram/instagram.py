@@ -2,41 +2,103 @@ import threading
 import time
 from pathlib import Path
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+import pandas as pd
 from playwright.sync_api import sync_playwright
 
 INSTAGRAM_URL = "https://www.instagram.com/"
+EXCEL_FILE = "ranking_engajamento_instagram.xlsx"
+CSV_FILE = "ranking_engajamento_instagram.csv"
 STORAGE_STATE = Path("instagram_state.json")
 
+def extrair_curtidas(page, ranking_engajamento, log_callback):
+    # CORREÇÃO 1: Adicionamos ':visible' para ignorar qualquer modal fantasma/oculto no HTML
+    try:
+        page.wait_for_selector('div[role="dialog"]:visible', timeout=3000)
+    except:
+        log_callback("ERRO: A janela de curtidas nao foi detectada na tela.")
+        return False
 
-def clicar_curtidas(page, log_callback):
-    seletores = [
-        'a[href*="/liked_by/"]',
-        'button:has-text("curtidas")',
-        'button:has-text("Curtidas")',
-        'a:has-text("curtidas")',
-        'a:has-text("Curtidas")',
-        'span:has-text("curtidas")',
-        'span:has-text("Curtidas")',
-        'a:has-text("likes")',
-        'button:has-text("likes")',
-    ]
+    post_url = page.url 
+    log_callback(f"Capturando curtidas do link: {post_url}")
+    log_callback("Modal detectado. Rolando para carregar todas as curtidas...")
 
-    for seletor in seletores:
-        alvo = page.locator(seletor).first
-        try:
-            if alvo.is_visible(timeout=1200):
-                alvo.click()
-                time.sleep(1)
-                log_callback("Clique em curtidas executado.")
-                return True
-        except PlaywrightTimeoutError:
-            continue
-        except Exception:
-            continue
+    pessoas_carregadas = 0
+    tentativas_sem_novo_nome = 0
+    usuarios_coletados_neste_post = set()
 
-    log_callback("ERRO: Nao encontrei um botao/link de curtidas visivel.")
-    return False
+    # Loop de scroll
+    while tentativas_sem_novo_nome < 4:
+        # CORREÇÃO 2: Busca os textos apenas dentro do modal que está efetivamente visível
+        elementos = page.locator('div[role="dialog"]:visible span[dir="auto"]').all_inner_texts()
+        
+        for user in elementos:
+            nome_limpo = user.strip()
+            # Filtra textos genéricos vazios ou textos grandes que não são arrobas
+            if nome_limpo and "\n" not in nome_limpo and len(nome_limpo) < 35:
+                usuarios_coletados_neste_post.add(nome_limpo)
+
+        quantidade_atual = len(usuarios_coletados_neste_post)
+        if quantidade_atual == pessoas_carregadas:
+            tentativas_sem_novo_nome += 1
+        else:
+            tentativas_sem_novo_nome = 0
+            pessoas_carregadas = quantidade_atual
+            log_callback(f"Usuários encontrados até agora: {pessoas_carregadas}")
+
+        # CORREÇÃO 3: O JavaScript agora encontra o modal visível na tela (offsetHeight > 0)
+        page.evaluate('''
+            const modals = document.querySelectorAll('div[role="dialog"]');
+            const visibleModal = Array.from(modals).find(m => m.offsetHeight > 0);
+            
+            if (visibleModal) {
+                const scrollableDiv = Array.from(visibleModal.querySelectorAll('div')).find(
+                    el => getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll'
+                );
+                if (scrollableDiv) {
+                    scrollableDiv.scrollTop = scrollableDiv.scrollHeight;
+                }
+            }
+        ''')
+        time.sleep(1.5) # Tempo para o Instagram carregar a listagem (aumente se sua internet oscilar)
+
+    # Consolida os dados no ranking geral
+    novas_curtidas = 0
+    for nome_limpo in usuarios_coletados_neste_post:
+        ranking_engajamento.setdefault(nome_limpo, {"curtidas": 0, "urls": set()})
+        ranking_engajamento[nome_limpo]["curtidas"] += 1
+        ranking_engajamento[nome_limpo]["urls"].add(post_url)
+        novas_curtidas += 1
+
+    log_callback(f"{novas_curtidas} curtidas mapeadas neste post.")
+    log_callback("Abra a proxima janela de curtidas (em outro post) e clique em Confirmar.")
+    
+    # Tenta fechar o modal apertando Esc para facilitar sua vida na navegação
+    page.keyboard.press("Escape")
+    time.sleep(1)
+    return True
+
+def salvar_relatorio(ranking_engajamento, log_callback):
+    dados_finais = []
+    for nome, dados in ranking_engajamento.items():
+        urls_formatadas = ", ".join(dados["urls"])
+        dados_finais.append(
+            {
+                "Nome_Usuario": nome,
+                "Qtd_Curtidas": dados["curtidas"],
+                "URLs_dos_Posts": urls_formatadas,
+            }
+        )
+
+    if dados_finais:
+        df = pd.DataFrame(dados_finais)
+        # Ordena para quem curtiu mais vezes ficar no topo
+        df = df.sort_values(by="Qtd_Curtidas", ascending=False)
+        df.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
+        df.to_excel(EXCEL_FILE, index=False, engine="openpyxl")
+        log_callback(f"SUCESSO: {len(dados_finais)} contas unicas coletadas.")
+        log_callback(f"Arquivos gerados: {CSV_FILE} e {EXCEL_FILE}")
+    else:
+        log_callback("Nenhum dado de engajamento foi coletado ou não rolou o STOP.")
 
 
 class InstagramRunner:
@@ -78,6 +140,7 @@ class InstagramRunner:
         return False
 
     def _run(self):
+        ranking_engajamento = {}
         browser = None
 
         try:
@@ -94,42 +157,46 @@ class InstagramRunner:
                 page.goto(INSTAGRAM_URL, wait_until="domcontentloaded")
                 time.sleep(4)
 
+                # Verifica Login
                 precisa_logar = False
                 if "/accounts/login" in page.url or "login" in page.url:
                     precisa_logar = True
                 else:
                     try:
-                        page.locator('input[name="username"], input[name="password"]').first.wait_for(
-                            state="visible", timeout=2200
-                        )
+                        page.locator('input[name="username"]').first.wait_for(state="visible", timeout=3000)
                         precisa_logar = True
-                    except PlaywrightTimeoutError:
+                    except:
                         pass
 
                 if precisa_logar:
                     self.log_callback("Instagram pediu login. Faca login no Chrome.")
                     page.goto("https://www.instagram.com/accounts/login/", wait_until="domcontentloaded")
-                    if not self._wait_for_confirm(
-                        "Depois de logar, abrir um post e visualizar o contador de curtidas, clique em 'Confirmar'."
-                    ):
+                    if not self._wait_for_confirm("Depois de logar, clique em 'Confirmar'."):
                         return
-                    time.sleep(2)
+                    time.sleep(3)
 
                 context.storage_state(path=str(STORAGE_STATE))
-                self.log_callback(
-                    "Modo inicial ativo. Abra o post desejado e clique em Confirmar para eu tentar abrir as curtidas."
-                )
+                contador_posts = 0
+                self.log_callback("Coleta iniciada. Navegue até o post, ABRA as curtidas e clique em Confirmar.")
 
+                # Loop de posts
                 while not self._stop_event.is_set():
-                    if not self._wait_for_confirm("Post pronto? Clique em Confirmar para clicar em curtidas."):
+                    prompt = f"[Post {contador_posts + 1}] Modal de curtidas ABERTO? Clique em Confirmar."
+                    if not self._wait_for_confirm(prompt):
                         break
                     if self._stop_event.is_set():
                         break
-                    clicar_curtidas(page, self.log_callback)
 
-                self.log_callback("Finalizando automacao e encerrando navegador...")
+                    sucesso_curtidas = extrair_curtidas(page, ranking_engajamento, self.log_callback)
+                    if sucesso_curtidas:
+                        contador_posts += 1
+
+                self.log_callback("Finalizando coleta e encerrando navegador...")
                 browser.close()
                 browser = None
+
+            # O salvamento do relatório roda após o fechamento do browser (seja clicando em Stop ou finalizando)
+            salvar_relatorio(ranking_engajamento, self.log_callback)
 
         except Exception as exc:
             self.log_callback(f"Erro inesperado: {exc}")
@@ -137,7 +204,6 @@ class InstagramRunner:
             if browser is not None:
                 try:
                     browser.close()
-                except Exception:
+                except:
                     pass
             self.finished_callback()
-

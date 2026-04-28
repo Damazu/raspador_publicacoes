@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 
+from instagram.instagram import InstagramRunner
 from scraper.linkedin import LinkedInRunner
 
 
@@ -11,18 +12,25 @@ class AppGUI:
         self.root.geometry("880x560")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        self.runner = LinkedInRunner(
+        self.linkedin_runner = LinkedInRunner(
             log_callback=self.log,
             waiting_callback=self.show_waiting_message,
             finished_callback=self.on_runner_finished,
         )
+        self.instagram_runner = InstagramRunner(
+            log_callback=self.log,
+            waiting_callback=self.show_waiting_message,
+            finished_callback=self.on_runner_finished,
+        )
+        self.current_runner = None
 
         self.main_frame = tk.Frame(root, padx=20, pady=20)
-        self.linkedin_frame = tk.Frame(root, padx=20, pady=20)
-        self.waiting_var = tk.StringVar(value="Clique em 'Comecar' para abrir o LinkedIn.")
+        self.automation_frame = tk.Frame(root, padx=20, pady=20)
+        self.page_title_var = tk.StringVar(value="Automacao")
+        self.waiting_var = tk.StringVar(value="Escolha uma rede social para comecar.")
 
         self._build_main_page()
-        self._build_linkedin_page()
+        self._build_automation_page()
         self.show_main_page()
 
     def _build_main_page(self):
@@ -41,7 +49,7 @@ class AppGUI:
             text="LinkedIn\nDisponivel",
             width=22,
             height=5,
-            command=self.show_linkedin_page,
+            command=lambda: self.show_automation_page("linkedin"),
             bg="#0A66C2",
             fg="white",
             font=("Segoe UI", 11, "bold"),
@@ -49,11 +57,13 @@ class AppGUI:
 
         tk.Button(
             cards,
-            text="Instagram\nEm breve",
+            text="Instagram\nDisponivel",
             width=22,
             height=5,
-            state="disabled",
-            font=("Segoe UI", 11),
+            command=lambda: self.show_automation_page("instagram"),
+            bg="#C13584",
+            fg="white",
+            font=("Segoe UI", 11, "bold"),
         ).grid(row=0, column=1, padx=14, pady=8)
 
         tk.Button(
@@ -65,17 +75,17 @@ class AppGUI:
             font=("Segoe UI", 11),
         ).grid(row=0, column=2, padx=14, pady=8)
 
-    def _build_linkedin_page(self):
-        top = tk.Frame(self.linkedin_frame)
+    def _build_automation_page(self):
+        top = tk.Frame(self.automation_frame)
         top.pack(fill="x")
 
         tk.Button(top, text="Voltar", command=self.show_main_page).pack(side="left")
-        tk.Label(top, text="LinkedIn - Coleta de Engajamento", font=("Segoe UI", 15, "bold")).pack(
+        tk.Label(top, textvariable=self.page_title_var, font=("Segoe UI", 15, "bold")).pack(
             side="left", padx=12
         )
 
         tk.Label(
-            self.linkedin_frame,
+            self.automation_frame,
             textvariable=self.waiting_var,
             font=("Segoe UI", 10, "italic"),
             justify="left",
@@ -83,14 +93,14 @@ class AppGUI:
             wraplength=820,
         ).pack(fill="x", pady=(16, 8))
 
-        botoes = tk.Frame(self.linkedin_frame)
+        botoes = tk.Frame(self.automation_frame)
         botoes.pack(fill="x", pady=(4, 10))
 
         self.btn_comecar = tk.Button(
             botoes,
             text="Comecar",
             width=16,
-            command=self.start_linkedin,
+            command=self.start_current_runner,
             bg="#1A7F37",
             fg="white",
             font=("Segoe UI", 10, "bold"),
@@ -113,7 +123,7 @@ class AppGUI:
             botoes,
             text="Sair",
             width=16,
-            command=self.stop_linkedin,
+            command=self.stop_current_runner,
             state="disabled",
             bg="#CF222E",
             fg="white",
@@ -122,7 +132,7 @@ class AppGUI:
         self.btn_sair.pack(side="left")
 
         self.log_box = scrolledtext.ScrolledText(
-            self.linkedin_frame,
+            self.automation_frame,
             height=20,
             font=("Consolas", 10),
             state="disabled",
@@ -133,34 +143,45 @@ class AppGUI:
         self.log_box.pack(fill="both", expand=True)
 
     def show_main_page(self):
-        self.linkedin_frame.pack_forget()
+        self.automation_frame.pack_forget()
         self.main_frame.pack(fill="both", expand=True)
 
-    def show_linkedin_page(self):
-        self.main_frame.pack_forget()
-        self.linkedin_frame.pack(fill="both", expand=True)
+    def show_automation_page(self, platform):
+        if platform == "linkedin":
+            self.current_runner = self.linkedin_runner
+            self.page_title_var.set("LinkedIn - Coleta de Engajamento")
+            self.waiting_var.set("Clique em 'Comecar' para abrir o LinkedIn.")
+        elif platform == "instagram":
+            self.current_runner = self.instagram_runner
+            self.page_title_var.set("Instagram - Fluxo Inicial de Curtidas")
+            self.waiting_var.set("Clique em 'Comecar' para abrir o Instagram.")
+        else:
+            return
 
-    def start_linkedin(self):
-        if self.runner.running:
+        self.main_frame.pack_forget()
+        self.automation_frame.pack(fill="both", expand=True)
+
+    def start_current_runner(self):
+        if self.current_runner is None or self.current_runner.running:
             return
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", tk.END)
         self.log_box.configure(state="disabled")
         self.waiting_var.set("Iniciando automacao e abrindo o Chrome...")
-        self.runner.start()
+        self.current_runner.start()
         self.btn_comecar.configure(state="disabled")
         self.btn_confirmar.configure(state="normal")
         self.btn_sair.configure(state="normal")
 
     def confirm_step(self):
-        if self.runner.running:
-            self.runner.confirm()
+        if self.current_runner is not None and self.current_runner.running:
+            self.current_runner.confirm()
 
-    def stop_linkedin(self):
-        if not self.runner.running:
+    def stop_current_runner(self):
+        if self.current_runner is None or not self.current_runner.running:
             return
         if messagebox.askyesno("Encerrar coleta", "Deseja sair e finalizar a coleta agora?"):
-            self.runner.stop()
+            self.current_runner.stop()
             self.waiting_var.set("Encerrando processo...")
 
     def show_waiting_message(self, message):
@@ -183,7 +204,9 @@ class AppGUI:
         prefixes_lifecycle = (
             "Acessando:",
             "LinkedIn pediu login",
+            "Instagram pediu login",
             "Coleta iniciada",
+            "Modo inicial ativo.",
             "Finalizando coleta",
             "SUCESSO:",
             "Arquivos gerados:",
@@ -205,6 +228,8 @@ class AppGUI:
         self.root.after(0, _append)
 
     def on_close(self):
-        if self.runner.running:
-            self.runner.stop()
+        if self.linkedin_runner.running:
+            self.linkedin_runner.stop()
+        if self.instagram_runner.running:
+            self.instagram_runner.stop()
         self.root.destroy()

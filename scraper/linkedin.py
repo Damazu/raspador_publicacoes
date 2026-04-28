@@ -32,7 +32,6 @@ def obter_url_post_ativo(page):
         return f"https://www.linkedin.com/feed/update/{urn}/"
     return "URL nao identificada"
 
-
 def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
     base_modal_selector = "div[role='dialog'].social-details-reactors-modal"
     modal = page.locator(base_modal_selector).first
@@ -82,7 +81,6 @@ def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
     page.keyboard.press("Escape")
     time.sleep(1)
     return True
-
 
 def salvar_relatorio(ranking_engajamento, log_callback):
     dados_finais = []
