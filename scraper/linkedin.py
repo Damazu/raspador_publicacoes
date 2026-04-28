@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 URL = "https://www.linkedin.com/feed/"
@@ -31,6 +32,7 @@ def obter_url_post_ativo(page):
     if urn:
         return f"https://www.linkedin.com/feed/update/{urn}/"
     return "URL nao identificada"
+
 
 def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
     base_modal_selector = "div[role='dialog'].social-details-reactors-modal"
@@ -82,6 +84,7 @@ def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
     time.sleep(1)
     return True
 
+
 def salvar_relatorio(ranking_engajamento, log_callback):
     dados_finais = []
     for nome, dados in ranking_engajamento.items():
@@ -106,6 +109,26 @@ def salvar_relatorio(ranking_engajamento, log_callback):
         log_callback(f"Arquivos gerados: {CSV_FILE} e {EXCEL_FILE}")
     else:
         log_callback("Nenhum dado de engajamento foi coletado.")
+
+
+def sessao_linkedin_ativa(page):
+    indicadores_logado = [
+        'button[aria-label*="Eu"]',
+        'a[href="/feed/"]',
+        'a[href*="/mynetwork/"]',
+        'input[placeholder*="Pesquisar"]',
+        'input[aria-label*="Pesquisar"]',
+    ]
+
+    for seletor in indicadores_logado:
+        try:
+            if page.locator(seletor).first.is_visible(timeout=1200):
+                return True
+        except PlaywrightTimeoutError:
+            continue
+        except Exception:
+            continue
+    return False
 
 
 class LinkedInRunner:
@@ -160,30 +183,53 @@ class LinkedInRunner:
                 context = browser.new_context(**ctx_opts)
                 page = context.new_page()
 
-                self.log_callback(f"Acessando: {URL}")
-                page.goto(URL, wait_until="domcontentloaded")
-                time.sleep(4)
+                self.log_callback("Acessando o LinkedIn...")
+                
+                # CORREÇÃO 1: Trata o erro de interrupção de rota do LinkedIn
+                try:
+                    page.goto(URL, wait_until="domcontentloaded")
+                except Exception as e:
+                    if "interrupted" in str(e).lower():
+                        self.log_callback("Redirecionamento automático detectado. Aguardando estabilizar...")
+                        time.sleep(3)
+                    else:
+                        raise e
 
+                time.sleep(3)
+
+                # Verifica se precisa logar
                 precisa_logar = False
                 if "signup" in page.url or "authwall" in page.url or "login" in page.url:
                     precisa_logar = True
-                elif page.locator(
-                    'a[href*="/login"], button:has-text("Entrar"), button:has-text("Sign in")'
-                ).first.is_visible(timeout=3000):
+                elif not sessao_linkedin_ativa(page):
                     precisa_logar = True
 
                 if precisa_logar:
                     self.log_callback("LinkedIn pediu login. Faca login no Chrome.")
                     page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
-                    if not self._wait_for_confirm("Depois de logar e abrir o feed, clique em 'Confirmar'."):
+                    if not self._wait_for_confirm("Depois de logar e o feed carregar, clique em 'Confirmar'."):
                         return
                     time.sleep(3)
-                    page.goto(URL, wait_until="domcontentloaded")
-                    time.sleep(3)
 
+                    if not sessao_linkedin_ativa(page):
+                        self.log_callback("ERRO: Login ainda nao detectado. Conecte a conta e clique em Confirmar novamente.")
+                        if not self._wait_for_confirm("Finalize o login no LinkedIn e clique em 'Confirmar'."):
+                            return
+                        time.sleep(2)
+                        if not sessao_linkedin_ativa(page):
+                            self.log_callback("ERRO: Nao foi possivel confirmar sessao logada no LinkedIn.")
+                            return
+                    
                 context.storage_state(path=str(STORAGE_STATE))
+
+                # CORREÇÃO 2: Força a ida para a URL alvo APÓS o login estar confirmado
+                if "feed" not in page.url:
+                    self.log_callback("Indo para a página alvo dos posts...")
+                    page.goto(URL, wait_until="domcontentloaded")
+                    time.sleep(4)
+
                 contador_posts = 0
-                self.log_callback("Coleta iniciada. Abra reacoes no Chrome e clique em Confirmar.")
+                self.log_callback("Coleta iniciada. Abra as reacoes no Chrome e clique em Confirmar.")
 
                 while not self._stop_event.is_set():
                     prompt = f"[Post {contador_posts + 1}] Janela de reacoes aberta? Clique em Confirmar."
@@ -202,6 +248,7 @@ class LinkedInRunner:
                 browser = None
 
             salvar_relatorio(ranking_engajamento, self.log_callback)
+            
         except Exception as exc:
             self.log_callback(f"Erro inesperado: {exc}")
         finally:
