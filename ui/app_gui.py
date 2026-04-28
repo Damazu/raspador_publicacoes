@@ -5,6 +5,133 @@ from instagram.instagram import InstagramRunner
 from scraper.linkedin import LinkedInRunner
 
 
+class RoundedButton(tk.Canvas):
+    def __init__(
+        self,
+        parent,
+        text,
+        command,
+        width=170,
+        height=44,
+        radius=16,
+        bg="#2F81F7",
+        fg="white",
+        hover_bg="#3B8CFF",
+        disabled_bg="#C9D1D9",
+        disabled_fg="#6E7781",
+        font=("Segoe UI", 10, "bold"),
+        state="normal",
+    ):
+        super().__init__(parent, width=width, height=height, bd=0, highlightthickness=0, bg=parent.cget("bg"))
+        self._text = text
+        self._command = command
+        self._width = width
+        self._height = height
+        self._radius = radius
+        self._bg = bg
+        self._fg = fg
+        self._hover_bg = hover_bg
+        self._disabled_bg = disabled_bg
+        self._disabled_fg = disabled_fg
+        self._font = font
+        self._state = state
+        self._is_hover = False
+
+        self._shape_id = None
+        self._text_id = None
+        self._draw()
+
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+
+    def _draw(self):
+        self.delete("all")
+        fill_color, text_color = self._current_colors()
+        self._shape_id = self._create_round_rect(
+            1, 1, self._width - 1, self._height - 1, self._radius, fill=fill_color, outline=""
+        )
+        self._text_id = self.create_text(
+            self._width / 2, self._height / 2, text=self._text, fill=text_color, font=self._font
+        )
+
+    def _create_round_rect(self, x1, y1, x2, y2, r, **kwargs):
+        points = [
+            x1 + r,
+            y1,
+            x2 - r,
+            y1,
+            x2,
+            y1,
+            x2,
+            y1 + r,
+            x2,
+            y2 - r,
+            x2,
+            y2,
+            x2 - r,
+            y2,
+            x1 + r,
+            y2,
+            x1,
+            y2,
+            x1,
+            y2 - r,
+            x1,
+            y1 + r,
+            x1,
+            y1,
+        ]
+        return self.create_polygon(points, smooth=True, splinesteps=24, **kwargs)
+
+    def _current_colors(self):
+        if self._state == "disabled":
+            return self._disabled_bg, self._disabled_fg
+        if self._is_hover:
+            return self._hover_bg, self._fg
+        return self._bg, self._fg
+
+    def _on_enter(self, _event):
+        if self._state != "disabled":
+            self._is_hover = True
+            self._draw()
+
+    def _on_leave(self, _event):
+        self._is_hover = False
+        self._draw()
+
+    def _on_click(self, _event):
+        if self._state != "disabled" and callable(self._command):
+            self._command()
+
+    def configure(self, cnf=None, **kwargs):
+        params = {}
+        if cnf and isinstance(cnf, dict):
+            params.update(cnf)
+        params.update(kwargs)
+
+        if "text" in params:
+            self._text = params["text"]
+        if "state" in params:
+            self._state = params["state"]
+            if self._state == "disabled":
+                self._is_hover = False
+        if "command" in params:
+            self._command = params["command"]
+        if "bg" in params:
+            self._bg = params["bg"]
+        if "fg" in params:
+            self._fg = params["fg"]
+        if "hover_bg" in params:
+            self._hover_bg = params["hover_bg"]
+        if "font" in params:
+            self._font = params["font"]
+
+        self._draw()
+
+    config = configure
+
+
 class AppGUI:
     def __init__(self, root):
         self.root = root
@@ -44,42 +171,58 @@ class AppGUI:
         cards = tk.Frame(self.main_frame)
         cards.pack(fill="x")
 
-        tk.Button(
+        RoundedButton(
             cards,
             text="LinkedIn\nDisponivel",
-            width=22,
-            height=5,
             command=lambda: self.show_automation_page("linkedin"),
             bg="#0A66C2",
-            fg="white",
+            hover_bg="#0D74DE",
+            width=190,
+            height=84,
+            radius=22,
             font=("Segoe UI", 11, "bold"),
-        ).grid(row=0, column=0, padx=(0, 14), pady=8)
+        ).grid(row=0, column=0, padx=(0, 14), pady=8, sticky="w")
 
-        tk.Button(
+        RoundedButton(
             cards,
             text="Instagram\nDisponivel",
-            width=22,
-            height=5,
             command=lambda: self.show_automation_page("instagram"),
             bg="#C13584",
-            fg="white",
+            hover_bg="#D94A96",
+            width=190,
+            height=84,
+            radius=22,
             font=("Segoe UI", 11, "bold"),
-        ).grid(row=0, column=1, padx=14, pady=8)
+        ).grid(row=0, column=1, padx=14, pady=8, sticky="w")
 
-        tk.Button(
+        RoundedButton(
             cards,
             text="Facebook\nEm breve",
-            width=22,
-            height=5,
+            command=lambda: None,
             state="disabled",
+            width=190,
+            height=84,
+            radius=22,
+            bg="#8C959F",
             font=("Segoe UI", 11),
-        ).grid(row=0, column=2, padx=14, pady=8)
+        ).grid(row=0, column=2, padx=14, pady=8, sticky="w")
 
     def _build_automation_page(self):
         top = tk.Frame(self.automation_frame)
         top.pack(fill="x")
 
-        tk.Button(top, text="Voltar", command=self.show_main_page).pack(side="left")
+        self.btn_voltar = RoundedButton(
+            top,
+            text="← Voltar",
+            command=self.show_main_page,
+            width=116,
+            height=40,
+            radius=20,
+            bg="#111827",
+            hover_bg="#1F2937",
+            font=("Segoe UI", 10, "bold"),
+        )
+        self.btn_voltar.pack(side="left", pady=(2, 0))
         tk.Label(top, textvariable=self.page_title_var, font=("Segoe UI", 15, "bold")).pack(
             side="left", padx=12
         )
@@ -96,37 +239,43 @@ class AppGUI:
         botoes = tk.Frame(self.automation_frame)
         botoes.pack(fill="x", pady=(4, 10))
 
-        self.btn_comecar = tk.Button(
+        self.btn_comecar = RoundedButton(
             botoes,
             text="Comecar",
-            width=16,
             command=self.start_current_runner,
             bg="#1A7F37",
-            fg="white",
+            hover_bg="#238F43",
+            width=140,
+            height=42,
+            radius=18,
             font=("Segoe UI", 10, "bold"),
         )
         self.btn_comecar.pack(side="left")
 
-        self.btn_confirmar = tk.Button(
+        self.btn_confirmar = RoundedButton(
             botoes,
             text="Confirmar",
-            width=16,
             command=self.confirm_step,
             state="disabled",
             bg="#2F81F7",
-            fg="white",
+            hover_bg="#4C92F7",
+            width=140,
+            height=42,
+            radius=18,
             font=("Segoe UI", 10, "bold"),
         )
         self.btn_confirmar.pack(side="left", padx=12)
 
-        self.btn_sair = tk.Button(
+        self.btn_sair = RoundedButton(
             botoes,
             text="Sair",
-            width=16,
             command=self.stop_current_runner,
             state="disabled",
             bg="#CF222E",
-            fg="white",
+            hover_bg="#E04652",
+            width=140,
+            height=42,
+            radius=18,
             font=("Segoe UI", 10, "bold"),
         )
         self.btn_sair.pack(side="left")
