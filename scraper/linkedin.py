@@ -106,66 +106,102 @@ def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
 
 def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
     try:
-        log_callback(f"Iniciando raspagem de comentários. Lendo a tela...")
+        log_callback(f"Iniciando raspagem de comentários estrutural...")
 
-        # Seletores mais abrangentes que pegam o nome do autor do comentário e de respostas (replies)
-        seletor_nomes = ".comments-post-meta__name-text, span.comments-post-meta__name div[dir='ltr']"
-        
         usuarios_coletados_neste_post = set()
         pessoas_carregadas = 0
         tentativas_sem_novo_nome = 0
 
-        # Dá um pequeno scroll para cima para garantir que não perdemos o primeiro comentário
-        safe_page_evaluate(page, "window.scrollBy(0, -500);")
-        time.sleep(1)
+        # Rola a tela um pouco para o centro para ativar o carregamento do LinkedIn
+        safe_page_evaluate(page, "window.scrollBy(0, 300);")
+        time.sleep(1.5)
 
-        # Loop de "Pesca": Rola a tela para baixo aos poucos para forçar o LinkedIn 
-        # a colocar os próximos comentários no código HTML (Virtual DOM).
+        # Loop de "Pesca"
         while tentativas_sem_novo_nome < 4:
             
-            # 1. Pega os nomes que estão renderizados na tela neste exato segundo
-            try:
-                elementos_nome = page.locator(seletor_nomes).all_inner_texts()
-                
-                for texto in elementos_nome:
-                    # Limpa quebras de linha e o "• 1º grau" que o LinkedIn costuma grudar no nome
-                    nome_limpo = texto.split("\n")[0].split("•")[0].strip()
-                    
-                    # Filtra nomes vazios ou usuários anônimos
-                    if nome_limpo and "LinkedIn Member" not in nome_limpo and "Usuário do LinkedIn" not in nome_limpo:
-                        usuarios_coletados_neste_post.add(nome_limpo)
-            except Exception:
-                pass
+            # O Extrator JavaScript agora usa as "Minas de Ouro" do seu HTML
+            nomes_brutos = safe_page_evaluate(page, """() => {
+                let dados = new Set();
 
-            # 2. Verifica se a quantidade de pessoas únicas na nossa "rede" aumentou
+                // ESTRATÉGIA 1: O Botão de Opções do Comentário (100% preciso)
+                let botoes = document.querySelectorAll('button[aria-label*="comentário de"], button[aria-label*="resposta de"]');
+                botoes.forEach(btn => {
+                    let label = btn.getAttribute('aria-label');
+                    if (label) {
+                        // Extrai tudo que está entre "comentário de " e o ponto final "."
+                        let match = label.match(/(?:comentário de|resposta de) (.*?)(?:\.|$)/i);
+                        if (match && match[1]) {
+                            dados.add(match[1].trim());
+                        }
+                    }
+                });
+
+                // ESTRATÉGIA 2: A tag Span invisível (Fallback perfeito baseado no seu HTML)
+                let spans = document.querySelectorAll('a[href*="/in/"] span[aria-hidden="true"], a[href*="/company/"] span[aria-hidden="true"]');
+                spans.forEach(span => {
+                    // Garante que pegamos apenas o nó de texto (nodeType 3), ignorando "Premium Perfil 2º"
+                    if (span.childNodes.length > 0 && span.childNodes[0].nodeType === 3) { 
+                        let nome = span.childNodes[0].nodeValue.trim();
+                        if (nome.length > 2) {
+                            dados.add(nome);
+                        }
+                    }
+                });
+
+                return Array.from(dados);
+            }""")
+
+            # Limpeza final no Python
+            if nomes_brutos:
+                for nome in nomes_brutos:
+                    nome_limpo = nome.strip()
+                    if not nome_limpo: continue
+
+                    # Filtro de segurança caso o LinkedIn jogue lixo
+                    lixo = ["link do gráfico", "gostei", "responder", "reações"]
+                    if any(palavra in nome_limpo.lower() for palavra in lixo):
+                        continue
+
+                    usuarios_coletados_neste_post.add(nome_limpo)
+
+            # Verifica progresso da contagem
             quantidade_atual = len(usuarios_coletados_neste_post)
             if quantidade_atual == pessoas_carregadas:
                 tentativas_sem_novo_nome += 1
             else:
                 tentativas_sem_novo_nome = 0
                 pessoas_carregadas = quantidade_atual
-                log_callback(f"Comentários contabilizados até agora: {pessoas_carregadas}")
+                log_callback(f"Comentários detectados até agora: {pessoas_carregadas}")
 
-            # 3. Rola a página para baixo para expor o próximo lote de comentários
-            # O mouse.wheel é excelente porque rola a página independentemente de ser um modal ou o feed principal
-            try:
-                page.mouse.wheel(0, 700)
-            except Exception:
-                safe_page_evaluate(page, "window.scrollBy(0, 700);")
-                
-            time.sleep(1.5) # Tempo crucial para o LinkedIn processar o scroll e injetar o HTML
+            # Scroll para expor novos comentários
+            safe_page_evaluate(page, """() => {
+                let modal = document.querySelector('div[role="dialog"]');
+                if (modal) {
+                    let scrollable = Array.from(modal.querySelectorAll('div')).find(
+                        el => getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll'
+                    );
+                    if (scrollable) { scrollable.scrollBy(0, 600); } 
+                    else { modal.scrollBy(0, 600); }
+                } else {
+                    window.scrollBy(0, 600);
+                }
+            }""")
+            
+            time.sleep(1.5)
 
-        # Consolidação: Agora que temos todos os nomes únicos, jogamos no dicionário principal
+        # Adiciona os dados coletados no dicionário mestre
         novos_comentarios = 0
         for nome_limpo in usuarios_coletados_neste_post:
-            ranking_engajamento.setdefault(nome_limpo, {"reacoes": 0, "comentarios": 0, "urls": set()})
             
-            # Adiciona +1 apenas na coluna de comentários deste usuário
+            # ATENÇÃO: Se não quiser que a própria empresa contabilize comentários, remova o "#" da linha abaixo e mude "houer" pelo nome que aparece nela
+            # if nome_limpo.lower() == "houer": continue 
+            
+            ranking_engajamento.setdefault(nome_limpo, {"reacoes": 0, "comentarios": 0, "urls": set()})
             ranking_engajamento[nome_limpo]["comentarios"] += 1
             ranking_engajamento[nome_limpo]["urls"].add(post_url)
             novos_comentarios += 1
 
-        log_callback(f"SUCESSO: {novos_comentarios} comentários mapeados neste post.")
+        log_callback(f"SUCESSO: {novos_comentarios} comentários únicos mapeados neste post.")
         return True
 
     except Exception as e:
