@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
@@ -12,8 +13,26 @@ CSV_FILE = "ranking_engajamento.csv"
 STORAGE_STATE = Path("linkedin_state.json")
 
 
+def safe_page_evaluate(page, script, retries=2, wait_seconds=1.2):
+    for tentativa in range(retries + 1):
+        try:
+            return page.evaluate(script)
+        except PlaywrightError as exc:
+            mensagem = str(exc).lower()
+            if "execution context was destroyed" in mensagem or "most likely because of a navigation" in mensagem:
+                if tentativa >= retries:
+                    raise
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=4000)
+                except Exception:
+                    pass
+                time.sleep(wait_seconds)
+                continue
+            raise
+
+
 def obter_url_post_ativo(page):
-    urn = page.evaluate("""() => {
+    urn = safe_page_evaluate(page, """() => {
         let posts = document.querySelectorAll("div[data-urn*='activity']:not([data-urn*='activity'] [data-urn*='activity'])");
         let targetUrn = null;
         let maxVisibleArea = 0;
@@ -59,11 +78,12 @@ def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
             tentativas_sem_novo_nome = 0
             pessoas_carregadas = quantidade_atual
 
-        page.evaluate(
+        safe_page_evaluate(
+            page,
             f"""
             var objDiv = document.querySelector("{seletor_scroll}");
             if(objDiv) {{ objDiv.scrollTop = objDiv.scrollHeight; }}
-        """
+        """,
         )
         time.sleep(1.5)
 
@@ -84,6 +104,73 @@ def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
     time.sleep(1)
     return True
 
+def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
+    try:
+        log_callback(f"Iniciando raspagem de comentários. Lendo a tela...")
+
+        # Seletores mais abrangentes que pegam o nome do autor do comentário e de respostas (replies)
+        seletor_nomes = ".comments-post-meta__name-text, span.comments-post-meta__name div[dir='ltr']"
+        
+        usuarios_coletados_neste_post = set()
+        pessoas_carregadas = 0
+        tentativas_sem_novo_nome = 0
+
+        # Dá um pequeno scroll para cima para garantir que não perdemos o primeiro comentário
+        safe_page_evaluate(page, "window.scrollBy(0, -500);")
+        time.sleep(1)
+
+        # Loop de "Pesca": Rola a tela para baixo aos poucos para forçar o LinkedIn 
+        # a colocar os próximos comentários no código HTML (Virtual DOM).
+        while tentativas_sem_novo_nome < 4:
+            
+            # 1. Pega os nomes que estão renderizados na tela neste exato segundo
+            try:
+                elementos_nome = page.locator(seletor_nomes).all_inner_texts()
+                
+                for texto in elementos_nome:
+                    # Limpa quebras de linha e o "• 1º grau" que o LinkedIn costuma grudar no nome
+                    nome_limpo = texto.split("\n")[0].split("•")[0].strip()
+                    
+                    # Filtra nomes vazios ou usuários anônimos
+                    if nome_limpo and "LinkedIn Member" not in nome_limpo and "Usuário do LinkedIn" not in nome_limpo:
+                        usuarios_coletados_neste_post.add(nome_limpo)
+            except Exception:
+                pass
+
+            # 2. Verifica se a quantidade de pessoas únicas na nossa "rede" aumentou
+            quantidade_atual = len(usuarios_coletados_neste_post)
+            if quantidade_atual == pessoas_carregadas:
+                tentativas_sem_novo_nome += 1
+            else:
+                tentativas_sem_novo_nome = 0
+                pessoas_carregadas = quantidade_atual
+                log_callback(f"Comentários contabilizados até agora: {pessoas_carregadas}")
+
+            # 3. Rola a página para baixo para expor o próximo lote de comentários
+            # O mouse.wheel é excelente porque rola a página independentemente de ser um modal ou o feed principal
+            try:
+                page.mouse.wheel(0, 700)
+            except Exception:
+                safe_page_evaluate(page, "window.scrollBy(0, 700);")
+                
+            time.sleep(1.5) # Tempo crucial para o LinkedIn processar o scroll e injetar o HTML
+
+        # Consolidação: Agora que temos todos os nomes únicos, jogamos no dicionário principal
+        novos_comentarios = 0
+        for nome_limpo in usuarios_coletados_neste_post:
+            ranking_engajamento.setdefault(nome_limpo, {"reacoes": 0, "comentarios": 0, "urls": set()})
+            
+            # Adiciona +1 apenas na coluna de comentários deste usuário
+            ranking_engajamento[nome_limpo]["comentarios"] += 1
+            ranking_engajamento[nome_limpo]["urls"].add(post_url)
+            novos_comentarios += 1
+
+        log_callback(f"SUCESSO: {novos_comentarios} comentários mapeados neste post.")
+        return True
+
+    except Exception as e:
+        log_callback(f"Erro ao extrair comentários: {e}")
+        return False
 
 def salvar_relatorio(ranking_engajamento, log_callback):
     dados_finais = []
@@ -109,7 +196,6 @@ def salvar_relatorio(ranking_engajamento, log_callback):
         log_callback(f"Arquivos gerados: {CSV_FILE} e {EXCEL_FILE}")
     else:
         log_callback("Nenhum dado de engajamento foi coletado.")
-
 
 def sessao_linkedin_ativa(page):
     indicadores_logado = [
@@ -229,19 +315,34 @@ class LinkedInRunner:
                     time.sleep(4)
 
                 contador_posts = 0
-                self.log_callback("Coleta iniciada. Abra as reacoes no Chrome e clique em Confirmar.")
+                self.log_callback("Coleta iniciada em etapas: 1) Reacoes, 2) Comentarios.")
 
                 while not self._stop_event.is_set():
-                    prompt = f"[Post {contador_posts + 1}] Janela de reacoes aberta? Clique em Confirmar."
-                    if not self._wait_for_confirm(prompt):
+                    indice_post = contador_posts + 1
+                    prompt_reacoes = (
+                        f"[Post {indice_post} - Etapa 1/2] Abra a janela de reacoes e clique em Confirmar."
+                    )
+                    if not self._wait_for_confirm(prompt_reacoes):
                         break
                     if self._stop_event.is_set():
                         break
 
                     post_url = obter_url_post_ativo(page)
                     sucesso_reacoes = extrair_reacoes(page, ranking_engajamento, post_url, self.log_callback)
-                    if sucesso_reacoes:
+
+                    prompt_comentarios = (
+                        f"[Post {indice_post} - Etapa 2/2] Abra os comentarios do mesmo post e clique em Confirmar."
+                    )
+                    if not self._wait_for_confirm(prompt_comentarios):
+                        break
+                    if self._stop_event.is_set():
+                        break
+
+                    sucesso_comentarios = extrair_comentarios(page, ranking_engajamento, post_url, self.log_callback)
+                    
+                    if sucesso_reacoes or sucesso_comentarios:
                         contador_posts += 1
+                        self.log_callback(f"--- Post {contador_posts} finalizado (reacoes + comentarios). Role para o proximo. ---")
 
                 self.log_callback("Finalizando coleta e encerrando navegador...")
                 browser.close()
