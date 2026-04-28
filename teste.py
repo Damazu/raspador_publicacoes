@@ -56,30 +56,32 @@ def realizar_login(page, context, url_destino):
 
 
 def obter_url_post_ativo(page):
-    """
-    Escaneia a tela atual do navegador para descobrir qual post está mais visível 
-    no centro da tela no momento em que você apertou ENTER, e extrai o URN dele.
-    """
-    urn = page.evaluate("""() => {
-        let posts = document.querySelectorAll("div[data-urn*='activity']:not([data-urn*='activity'] [data-urn*='activity'])");
-        let targetUrn = null;
-        let maxVisibleArea = 0;
-        
-        for (let p of posts) {
-            let rect = p.getBoundingClientRect();
-            // Calcula qual post está ocupando mais espaço na tela
-            let visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
-            if (visibleHeight > maxVisibleArea) {
-                maxVisibleArea = visibleHeight;
-                targetUrn = p.getAttribute("data-urn");
+    try:
+        urn = page.evaluate("""() => {
+            let posts = document.querySelectorAll("div[data-urn*='activity']:not([data-urn*='activity'] [data-urn*='activity'])");
+            let targetUrn = null;
+            let maxVisibleArea = 0;
+
+            for (let p of posts) {
+                let rect = p.getBoundingClientRect();
+                let visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
+                if (visibleHeight > maxVisibleArea) {
+                    maxVisibleArea = visibleHeight;
+                    targetUrn = p.getAttribute("data-urn");
+                }
             }
-        }
-        return targetUrn;
-    }""")
-    
-    if urn:
-        return f"https://www.linkedin.com/feed/update/{urn}/"
-    return "URL não identificada"
+            return targetUrn;
+        }""")
+
+        if urn:
+            return f"https://www.linkedin.com/feed/update/{urn}/"
+            
+    except Exception as e:
+        # Se o contexto foi destruído, apenas ignoramos e retornamos que não achou a URL
+        if "Execution context was destroyed" in str(e):
+            pass
+            
+    return "URL nao identificada (Pagina recarregou)"
 
 
 def extrair_reacoes(page, ranking_engajamento, post_url):
