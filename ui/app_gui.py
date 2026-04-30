@@ -143,6 +143,7 @@ class AppGUI:
             log_callback=self.log,
             waiting_callback=self.show_waiting_message,
             finished_callback=self.on_runner_finished,
+            stage_callback=self.on_linkedin_stage_change,
         )
         self.instagram_runner = InstagramRunner(
             log_callback=self.log,
@@ -150,6 +151,7 @@ class AppGUI:
             finished_callback=self.on_runner_finished,
         )
         self.current_runner = None
+        self.linkedin_reset_available = False
 
         self.main_frame = tk.Frame(root, padx=20, pady=20)
         self.automation_frame = tk.Frame(root, padx=20, pady=20)
@@ -318,9 +320,33 @@ class AppGUI:
         self.log_box.configure(state="disabled")
         self.waiting_var.set("Iniciando automacao e abrindo o Chrome...")
         self.current_runner.start()
-        self.btn_comecar.configure(state="disabled")
+        if self.current_runner is self.linkedin_runner:
+            self.linkedin_reset_available = False
+            self.btn_comecar.configure(
+                text="Parar",
+                command=self.reset_linkedin_post,
+                bg="#CF222E",
+                hover_bg="#E04652",
+                state="disabled",
+            )
+        else:
+            self.btn_comecar.configure(state="disabled")
         self.btn_confirmar.configure(state="normal")
         self.btn_sair.configure(state="normal")
+
+    def reset_linkedin_post(self):
+        if self.current_runner is not self.linkedin_runner or not self.current_runner.running:
+            return
+        if not self.linkedin_reset_available:
+            messagebox.showinfo(
+                "Aguarde etapa 1",
+                "O botao 'Parar' so fica ativo apos concluir a etapa 1 (reacoes).",
+            )
+            return
+        self.linkedin_runner.request_skip_current_post()
+        self.linkedin_reset_available = False
+        self.btn_comecar.configure(state="disabled")
+        self.waiting_var.set("Reset solicitado. Preparando validacao do proximo post...")
 
     def confirm_step(self):
         if self.current_runner is not None and self.current_runner.running:
@@ -339,11 +365,32 @@ class AppGUI:
     def on_runner_finished(self):
         def _finish():
             self.waiting_var.set("Processo finalizado.")
-            self.btn_comecar.configure(state="normal")
+            self.linkedin_reset_available = False
+            self.btn_comecar.configure(
+                text="Comecar",
+                command=self.start_current_runner,
+                bg="#1A7F37",
+                hover_bg="#238F43",
+                state="normal",
+            )
             self.btn_confirmar.configure(state="disabled")
             self.btn_sair.configure(state="disabled")
 
         self.root.after(0, _finish)
+
+    def on_linkedin_stage_change(self, stage):
+        def _update():
+            if self.current_runner is not self.linkedin_runner:
+                return
+            if stage == "etapa1_concluida":
+                self.linkedin_reset_available = True
+                self.btn_comecar.configure(state="normal")
+            elif stage in ("aguardando_etapa1", "idle"):
+                self.linkedin_reset_available = False
+                if self.linkedin_runner.running:
+                    self.btn_comecar.configure(state="disabled")
+
+        self.root.after(0, _update)
 
     @staticmethod
     def _infer_log_tag(message):

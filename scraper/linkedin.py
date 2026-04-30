@@ -13,6 +13,19 @@ CSV_FILE = "ranking_engajamento.csv"
 STORAGE_STATE = Path("linkedin_state.json")
 
 
+def garantir_pessoa(ranking_engajamento, nome):
+    ranking_engajamento.setdefault(
+        nome,
+        {
+            "reacoes": 0,
+            "comentarios": 0,
+            "compartilhamentos_com_pensamentos": 0,
+            "compartilhamentos_sem_pensamentos": 0,
+            "urls": set(),
+        },
+    )
+
+
 def safe_page_evaluate(page, script, retries=2, wait_seconds=1.2):
     for tentativa in range(retries + 1):
         try:
@@ -93,7 +106,7 @@ def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
     for texto in elementos_nome:
         nome_limpo = texto.split("\n")[0].strip()
         if nome_limpo:
-            ranking_engajamento.setdefault(nome_limpo, {"reacoes": 0, "comentarios": 0, "urls": set()})
+            garantir_pessoa(ranking_engajamento, nome_limpo)
             ranking_engajamento[nome_limpo]["reacoes"] += 1
             ranking_engajamento[nome_limpo]["urls"].add(post_url)
             novas_reacoes += 1
@@ -104,9 +117,103 @@ def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
     time.sleep(1)
     return True
 
+
+def extrair_compartilhamentos(page, ranking_engajamento, post_url, log_callback):
+    base_modal_selector = "div[role='dialog'].social-details-social-activity-modal"
+    modal = page.locator(base_modal_selector).first
+
+    if not modal.is_visible():
+        log_callback("ERRO: A janela de compartilhamentos nao esta aberta.")
+        return False
+
+    log_callback("Janela de compartilhamentos detectada. Rolando para carregar todos os nomes...")
+
+    seletor_scroll = f"{base_modal_selector} .artdeco-modal__content"
+    seletor_cards = f"{base_modal_selector} li, {base_modal_selector} .artdeco-entity-lockup"
+
+    quantidade_anterior = 0
+    tentativas_sem_novidade = 0
+
+    while tentativas_sem_novidade < 3:
+        quantidade_atual = page.locator(seletor_cards).count()
+        if quantidade_atual == quantidade_anterior:
+            tentativas_sem_novidade += 1
+        else:
+            tentativas_sem_novidade = 0
+            quantidade_anterior = quantidade_atual
+
+        safe_page_evaluate(
+            page,
+            f"""
+            var objDiv = document.querySelector("{seletor_scroll}");
+            if(objDiv) {{ objDiv.scrollTop = objDiv.scrollHeight; }}
+        """,
+        )
+        time.sleep(1.5)
+
+    cards = page.locator(seletor_cards)
+    total_cards = cards.count()
+    vistos = set()
+    com_pensamentos = 0
+    sem_pensamentos = 0
+
+    for i in range(total_cards):
+        texto_card = cards.nth(i).inner_text().strip()
+        if not texto_card:
+            continue
+
+        linhas = [linha.strip() for linha in texto_card.splitlines() if linha.strip()]
+        if not linhas:
+            continue
+
+        nome_limpo = linhas[0]
+        if not nome_limpo or nome_limpo in vistos:
+            continue
+
+        texto_card_lower = texto_card.lower()
+        possui_pensamento = any(
+            termo in texto_card_lower
+            for termo in (
+                "com pensamentos",
+                "with thoughts",
+                "adicionou",
+                "comentou",
+                "comentario",
+                "comentário",
+            )
+        )
+
+        garantir_pessoa(ranking_engajamento, nome_limpo)
+        if possui_pensamento:
+            ranking_engajamento[nome_limpo]["compartilhamentos_com_pensamentos"] += 1
+            com_pensamentos += 1
+        else:
+            ranking_engajamento[nome_limpo]["compartilhamentos_sem_pensamentos"] += 1
+            sem_pensamentos += 1
+
+        ranking_engajamento[nome_limpo]["urls"].add(post_url)
+        vistos.add(nome_limpo)
+
+    log_callback(
+        f"Compartilhamentos mapeados: {com_pensamentos} com pensamentos e {sem_pensamentos} sem pensamentos."
+    )
+    page.keyboard.press("Escape")
+    time.sleep(1)
+    return True
+
+
 def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
     try:
         log_callback(f"Iniciando raspagem de comentários estrutural...")
+
+        # 1. Extrai o ID único (URN) do post a partir da URL que o seu código já pegou
+        import re
+        match_urn = re.search(r'(urn:li:activity:\d+)', post_url)
+        urn_alvo = match_urn.group(1) if match_urn else ""
+
+        if not urn_alvo:
+            log_callback("ERRO: Não foi possível identificar a identidade (URN) do post. Abortando extração.")
+            return False
 
         usuarios_coletados_neste_post = set()
         pessoas_carregadas = 0
@@ -114,42 +221,48 @@ def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
 
         # Rola a tela um pouco para o centro para ativar o carregamento do LinkedIn
         safe_page_evaluate(page, "window.scrollBy(0, 300);")
+        import time
         time.sleep(1.5)
 
         # Loop de "Pesca"
         while tentativas_sem_novo_nome < 4:
             
-            # O Extrator JavaScript agora usa as "Minas de Ouro" do seu HTML
-            nomes_brutos = safe_page_evaluate(page, """() => {
+            # O Extrator JavaScript agora usa a Identidade Exata do Post
+            # Usamos rf"" para permitir variáveis do Python dentro do script JS
+            nomes_brutos = safe_page_evaluate(page, rf"""() => {{
                 let dados = new Set();
+                
+                // ISOLAMENTO PERFEITO: Procura APENAS dentro do post atual usando o URN
+                let container = document.querySelector('div[data-urn="{urn_alvo}"]');
 
-                // ESTRATÉGIA 1: O Botão de Opções do Comentário (100% preciso)
-                let botoes = document.querySelectorAll('button[aria-label*="comentário de"], button[aria-label*="resposta de"]');
-                botoes.forEach(btn => {
+                // Se não achar o container do post, não faz nada (evita vazamento)
+                if (!container) return [];
+
+                // ESTRATÉGIA 1: O Botão de Opções do Comentário
+                let botoes = container.querySelectorAll('button[aria-label*="comentário de"], button[aria-label*="resposta de"]');
+                botoes.forEach(btn => {{
                     let label = btn.getAttribute('aria-label');
-                    if (label) {
-                        // Extrai tudo que está entre "comentário de " e o ponto final "."
+                    if (label) {{
                         let match = label.match(/(?:comentário de|resposta de) (.*?)(?:\.|$)/i);
-                        if (match && match[1]) {
+                        if (match && match[1]) {{
                             dados.add(match[1].trim());
-                        }
-                    }
-                });
+                        }}
+                    }}
+                }});
 
-                // ESTRATÉGIA 2: A tag Span invisível (Fallback perfeito baseado no seu HTML)
-                let spans = document.querySelectorAll('a[href*="/in/"] span[aria-hidden="true"], a[href*="/company/"] span[aria-hidden="true"]');
-                spans.forEach(span => {
-                    // Garante que pegamos apenas o nó de texto (nodeType 3), ignorando "Premium Perfil 2º"
-                    if (span.childNodes.length > 0 && span.childNodes[0].nodeType === 3) { 
+                // ESTRATÉGIA 2: A tag Span invisível
+                let spans = container.querySelectorAll('a[href*="/in/"] span[aria-hidden="true"], a[href*="/company/"] span[aria-hidden="true"]');
+                spans.forEach(span => {{
+                    if (span.childNodes.length > 0 && span.childNodes[0].nodeType === 3) {{ 
                         let nome = span.childNodes[0].nodeValue.trim();
-                        if (nome.length > 2) {
+                        if (nome.length > 2) {{
                             dados.add(nome);
-                        }
-                    }
-                });
+                        }}
+                    }}
+                }});
 
                 return Array.from(dados);
-            }""")
+            }}""")
 
             # Limpeza final no Python
             if nomes_brutos:
@@ -173,30 +286,17 @@ def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
                 pessoas_carregadas = quantidade_atual
                 log_callback(f"Comentários detectados até agora: {pessoas_carregadas}")
 
-            # Scroll para expor novos comentários
-            safe_page_evaluate(page, """() => {
-                let modal = document.querySelector('div[role="dialog"]');
-                if (modal) {
-                    let scrollable = Array.from(modal.querySelectorAll('div')).find(
-                        el => getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll'
-                    );
-                    if (scrollable) { scrollable.scrollBy(0, 600); } 
-                    else { modal.scrollBy(0, 600); }
-                } else {
-                    window.scrollBy(0, 600);
-                }
-            }""")
-            
+            # Como os comentários são expandidos inline na página, scrollamos a janela principal
+            safe_page_evaluate(page, "window.scrollBy(0, 600);")
             time.sleep(1.5)
 
         # Adiciona os dados coletados no dicionário mestre
         novos_comentarios = 0
         for nome_limpo in usuarios_coletados_neste_post:
             
-            # ATENÇÃO: Se não quiser que a própria empresa contabilize comentários, remova o "#" da linha abaixo e mude "empresa" pelo nome que aparece nela
             # if nome_limpo.lower() == "empresa": continue 
             
-            ranking_engajamento.setdefault(nome_limpo, {"reacoes": 0, "comentarios": 0, "urls": set()})
+            garantir_pessoa(ranking_engajamento, nome_limpo)
             ranking_engajamento[nome_limpo]["comentarios"] += 1
             ranking_engajamento[nome_limpo]["urls"].add(post_url)
             novos_comentarios += 1
@@ -211,13 +311,20 @@ def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
 def salvar_relatorio(ranking_engajamento, log_callback):
     dados_finais = []
     for nome, dados in ranking_engajamento.items():
-        total_engajamento = dados["reacoes"] + dados["comentarios"]
+        total_engajamento = (
+            dados["reacoes"]
+            + dados["comentarios"]
+            + dados["compartilhamentos_com_pensamentos"]
+            + dados["compartilhamentos_sem_pensamentos"]
+        )
         urls_formatadas = ", ".join(dados["urls"])
         dados_finais.append(
             {
                 "nome": nome,
                 "Qtd_Reacoes": dados["reacoes"],
                 "Qtd_Comentarios": dados["comentarios"],
+                "Qtd_Compartilhamentos_Com_Pensamentos": dados["compartilhamentos_com_pensamentos"],
+                "Qtd_Compartilhamentos_Sem_Pensamentos": dados["compartilhamentos_sem_pensamentos"],
                 "Engajamento_Total": total_engajamento,
                 "URLs_dos_Posts": urls_formatadas,
             }
@@ -254,12 +361,14 @@ def sessao_linkedin_ativa(page):
 
 
 class LinkedInRunner:
-    def __init__(self, log_callback, waiting_callback, finished_callback):
+    def __init__(self, log_callback, waiting_callback, finished_callback, stage_callback=None):
         self.log_callback = log_callback
         self.waiting_callback = waiting_callback
         self.finished_callback = finished_callback
+        self.stage_callback = stage_callback
         self._confirm_event = threading.Event()
         self._stop_event = threading.Event()
+        self._skip_post_event = threading.Event()
         self._thread = None
 
     @property
@@ -271,6 +380,7 @@ class LinkedInRunner:
             return
         self._confirm_event.clear()
         self._stop_event.clear()
+        self._skip_post_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -280,6 +390,23 @@ class LinkedInRunner:
     def stop(self):
         self._stop_event.set()
         self._confirm_event.set()
+
+    def request_skip_current_post(self):
+        self._skip_post_event.set()
+        self._confirm_event.set()
+
+    def _consume_skip_request(self):
+        if self._skip_post_event.is_set():
+            self._skip_post_event.clear()
+            return True
+        return False
+
+    def _notify_stage(self, stage):
+        if callable(self.stage_callback):
+            try:
+                self.stage_callback(stage)
+            except Exception:
+                pass
 
     def _wait_for_confirm(self, mensagem):
         self.waiting_callback(mensagem)
@@ -296,6 +423,7 @@ class LinkedInRunner:
         browser = None
 
         try:
+            self._notify_stage("idle")
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=False, channel="chrome")
                 ctx_opts = {"locale": "pt-BR", "viewport": {"width": 1280, "height": 800}}
@@ -351,12 +479,15 @@ class LinkedInRunner:
                     time.sleep(4)
 
                 contador_posts = 0
-                self.log_callback("Coleta iniciada em etapas: 1) Reacoes, 2) Comentarios.")
+                self.log_callback(
+                    "Coleta iniciada em etapas: 1) Reacoes, 2) Comentarios, 3) Compartilhamentos."
+                )
+                self._notify_stage("aguardando_etapa1")
 
                 while not self._stop_event.is_set():
                     indice_post = contador_posts + 1
                     prompt_reacoes = (
-                        f"[Post {indice_post} - Etapa 1/2] Abra a janela de reacoes e clique em Confirmar."
+                        f"[Post {indice_post} - Etapa 1/3] Abra a janela de reacoes e clique em Confirmar."
                     )
                     if not self._wait_for_confirm(prompt_reacoes):
                         break
@@ -365,20 +496,95 @@ class LinkedInRunner:
 
                     post_url = obter_url_post_ativo(page)
                     sucesso_reacoes = extrair_reacoes(page, ranking_engajamento, post_url, self.log_callback)
+                    self._notify_stage("etapa1_concluida")
+
+                    if self._consume_skip_request():
+                        if sucesso_reacoes:
+                            contador_posts += 1
+                        self.log_callback(
+                            f"Post {indice_post} resetado apos etapa 1. Prosseguindo para validacao do proximo post."
+                        )
+                        self._notify_stage("aguardando_etapa1")
+                        continue
 
                     prompt_comentarios = (
-                        f"[Post {indice_post} - Etapa 2/2] Abra os comentarios do mesmo post e clique em Confirmar."
+                        f"[Post {indice_post} - Etapa 2/3] Abra os comentarios do mesmo post e clique em Confirmar."
                     )
                     if not self._wait_for_confirm(prompt_comentarios):
                         break
                     if self._stop_event.is_set():
                         break
+                    if self._consume_skip_request():
+                        if sucesso_reacoes:
+                            contador_posts += 1
+                        self.log_callback(
+                            f"Post {indice_post} resetado apos etapa 1. Prosseguindo para validacao do proximo post."
+                        )
+                        self._notify_stage("aguardando_etapa1")
+                        continue
 
                     sucesso_comentarios = extrair_comentarios(page, ranking_engajamento, post_url, self.log_callback)
-                    
-                    if sucesso_reacoes or sucesso_comentarios:
+                    if self._consume_skip_request():
+                        if sucesso_reacoes or sucesso_comentarios:
+                            contador_posts += 1
+                        self.log_callback(
+                            f"Post {indice_post} resetado apos etapa 1. Prosseguindo para validacao do proximo post."
+                        )
+                        self._notify_stage("aguardando_etapa1")
+                        continue
+
+                    prompt_compartilhamentos = (
+                        f"[Post {indice_post} - Etapa 3/3] Abra a janela de compartilhamentos do mesmo post e clique em Confirmar."
+                    )
+                    if not self._wait_for_confirm(prompt_compartilhamentos):
+                        break
+                    if self._stop_event.is_set():
+                        break
+                    if self._consume_skip_request():
+                        if sucesso_reacoes or sucesso_comentarios:
+                            contador_posts += 1
+                        self.log_callback(
+                            f"Post {indice_post} resetado apos etapa 1. Prosseguindo para validacao do proximo post."
+                        )
+                        self._notify_stage("aguardando_etapa1")
+                        continue
+
+                    sucesso_compartilhamentos = extrair_compartilhamentos(
+                        page, ranking_engajamento, post_url, self.log_callback
+                    )
+
+                    if sucesso_reacoes or sucesso_comentarios or sucesso_compartilhamentos:
                         contador_posts += 1
-                        self.log_callback(f"--- Post {contador_posts} finalizado (reacoes + comentarios). Role para o proximo. ---")
+                        self.log_callback(
+                            f"--- Post {contador_posts} finalizado (reacoes + comentarios + compartilhamentos). ---"
+                        )
+                        
+                        # === INÍCIO DA LIMPEZA INTELIGENTE (SEM RELOAD) ===
+                        self.log_callback("Neutralizando HTML do post atual para evitar vazamentos...")
+                        try:
+                            safe_page_evaluate(page, """() => {
+                                // 1. Neutraliza os botões de comentários já lidos
+                                document.querySelectorAll('button[aria-label*="comentário de"], button[aria-label*="resposta de"]').forEach(btn => {
+                                    btn.setAttribute('aria-label', 'processado-pelo-robo');
+                                });
+
+                                // 2. Neutraliza os spans invisíveis de nomes já lidos
+                                document.querySelectorAll('span[aria-hidden="true"]').forEach(span => {
+                                    span.setAttribute('aria-hidden', 'processado-pelo-robo');
+                                });
+
+                                // 3. Desativa modais fantasmas para não atrapalhar o scroll do próximo post
+                                document.querySelectorAll('div[role="dialog"]').forEach(modal => {
+                                    modal.setAttribute('role', 'dialog-processado');
+                                    modal.style.display = 'none'; // Esconde de vez caso tenha ficado preso
+                                });
+                            }""")
+                            self.log_callback("Memória limpa com sucesso! Posição mantida. Role para o PRÓXIMO post.")
+                        except Exception as e:
+                            self.log_callback(f"Aviso ao tentar limpar o HTML: {e}")
+                        # === FIM DA LIMPEZA ===
+
+                    self._notify_stage("aguardando_etapa1")
 
                 self.log_callback("Finalizando coleta e encerrando navegador...")
                 browser.close()
@@ -389,6 +595,7 @@ class LinkedInRunner:
         except Exception as exc:
             self.log_callback(f"Erro inesperado: {exc}")
         finally:
+            self._notify_stage("idle")
             if browser is not None:
                 try:
                     browser.close()
