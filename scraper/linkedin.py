@@ -206,7 +206,7 @@ def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
     try:
         log_callback(f"Iniciando raspagem de comentários estrutural...")
 
-        # 1. Extrai o ID único (URN) do post a partir da URL que o seu código já pegou
+        # 1. Extrai o ID único (URN) do post a partir da URL
         import re
         match_urn = re.search(r'(urn:li:activity:\d+)', post_url)
         urn_alvo = match_urn.group(1) if match_urn else ""
@@ -219,23 +219,19 @@ def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
         pessoas_carregadas = 0
         tentativas_sem_novo_nome = 0
 
-        # Rola a tela um pouco para o centro para ativar o carregamento do LinkedIn
-        safe_page_evaluate(page, "window.scrollBy(0, 300);")
+        # Rola a tela um pouco para o centro apenas no início
+        safe_page_evaluate(page, "window.scrollBy(0, 200);")
         import time
         time.sleep(1.5)
 
-        # Loop de "Pesca"
-        while tentativas_sem_novo_nome < 4:
+        # Loop de "Pesca" - Reduzido para 3 tentativas para ser mais ágil
+        while tentativas_sem_novo_nome < 3:
             
-            # O Extrator JavaScript agora usa a Identidade Exata do Post
-            # Usamos rf"" para permitir variáveis do Python dentro do script JS
             nomes_brutos = safe_page_evaluate(page, rf"""() => {{
                 let dados = new Set();
                 
                 // ISOLAMENTO PERFEITO: Procura APENAS dentro do post atual usando o URN
                 let container = document.querySelector('div[data-urn="{urn_alvo}"]');
-
-                // Se não achar o container do post, não faz nada (evita vazamento)
                 if (!container) return [];
 
                 // ESTRATÉGIA 1: O Botão de Opções do Comentário
@@ -244,9 +240,7 @@ def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
                     let label = btn.getAttribute('aria-label');
                     if (label) {{
                         let match = label.match(/(?:comentário de|resposta de) (.*?)(?:\.|$)/i);
-                        if (match && match[1]) {{
-                            dados.add(match[1].trim());
-                        }}
+                        if (match && match[1]) dados.add(match[1].trim());
                     }}
                 }});
 
@@ -255,39 +249,38 @@ def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
                 spans.forEach(span => {{
                     if (span.childNodes.length > 0 && span.childNodes[0].nodeType === 3) {{ 
                         let nome = span.childNodes[0].nodeValue.trim();
-                        if (nome.length > 2) {{
-                            dados.add(nome);
-                        }}
+                        if (nome.length > 2) dados.add(nome);
                     }}
                 }});
 
                 return Array.from(dados);
             }}""")
 
-            # Limpeza final no Python
             if nomes_brutos:
                 for nome in nomes_brutos:
                     nome_limpo = nome.strip()
                     if not nome_limpo: continue
 
-                    # Filtro de segurança caso o LinkedIn jogue lixo
                     lixo = ["link do gráfico", "gostei", "responder", "reações"]
                     if any(palavra in nome_limpo.lower() for palavra in lixo):
                         continue
 
                     usuarios_coletados_neste_post.add(nome_limpo)
 
-            # Verifica progresso da contagem
+            # --- A MUDANÇA ESTÁ AQUI ---
             quantidade_atual = len(usuarios_coletados_neste_post)
             if quantidade_atual == pessoas_carregadas:
+                # Não achou ninguém novo. Apenas soma a tentativa e FICA PARADO (sem scroll)
                 tentativas_sem_novo_nome += 1
             else:
+                # Achou comentários novos! Zera as tentativas e DÁ O SCROLL para tentar carregar mais
                 tentativas_sem_novo_nome = 0
                 pessoas_carregadas = quantidade_atual
                 log_callback(f"Comentários detectados até agora: {pessoas_carregadas}")
+                
+                # Rola suavemente apenas se detectou avanço
+                safe_page_evaluate(page, "window.scrollBy(0, 300);")
 
-            # Como os comentários são expandidos inline na página, scrollamos a janela principal
-            safe_page_evaluate(page, "window.scrollBy(0, 600);")
             time.sleep(1.5)
 
         # Adiciona os dados coletados no dicionário mestre
