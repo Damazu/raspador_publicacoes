@@ -1,5 +1,14 @@
 *.pyc
 .venv/
+dist/
+build/
+*.spec
+*.spec.exe
+*.spec.py
+*.spec.pyw
+*.spec.pyz
+*.spec.pyz.exe
+
 
 __pycache__/
 */__pycache__/
