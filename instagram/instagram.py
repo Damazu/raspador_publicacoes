@@ -11,99 +11,194 @@ CSV_FILE = "ranking_engajamento_instagram.csv"
 STORAGE_STATE = Path("instagram_state.json")
 
 def extrair_curtidas(page, ranking_engajamento, log_callback):
+    import time
+    
     try:
-        page.wait_for_selector('div[role="dialog"]:visible', timeout=3000)
+        page.wait_for_selector('div[role="dialog"]:visible', timeout=4000)
     except:
         log_callback("ERRO: A janela de curtidas nao foi detectada na tela.")
         return False
 
     post_url = page.url 
-    log_callback(f"Capturando curtidas do link: {post_url}")
-    log_callback("Modal detectado. Rolando em pequenos passos para não pular ninguém...")
+    log_callback(f"Capturando Usuários e Nomes Reais do link: {post_url}")
 
     pessoas_carregadas = 0
-    # Aumentei para 6 tentativas, pois como o passo é menor, às vezes pode demorar um pouco mais para carregar
+    tentativas_sem_novo_nome = 0
+    # Agora usamos um dicionário local para guardar { "usuario": "Nome Real" }
+    usuarios_coletados_neste_post = {}
+
+    while tentativas_sem_novo_nome < 12:
+        
+        # A MÁGICA DE VÍNCULO NO JAVASCRIPT:
+        # Ele captura o @usuario e "sobe" no HTML para encontrar o Nome Real da mesma linha
+        dados_js = page.evaluate('''() => {
+            const modals = document.querySelectorAll('div[role="dialog"]');
+            const visibleModal = Array.from(modals).reverse().find(m => m.offsetHeight > 0);
+            if (!visibleModal) return [];
+
+            const results = [];
+            const userSpans = visibleModal.querySelectorAll('a[role="link"] span[dir="auto"]');
+
+            userSpans.forEach(span => {
+                const username = span.innerText.trim();
+                if (!username) return;
+
+                let realName = "";
+                let currentElement = span.closest('a');
+
+                // Sobe até 6 níveis na árvore HTML da pessoa para procurar o span solto do Nome Real
+                for (let i = 0; i < 6; i++) {
+                    if (!currentElement || !currentElement.parentElement) break;
+                    currentElement = currentElement.parentElement;
+
+                    const possibleRealNameSpan = Array.from(currentElement.querySelectorAll('span[dir="auto"]'))
+                        .find(s => !s.closest('a') && s.innerText.trim().length > 0);
+
+                    if (possibleRealNameSpan) {
+                        realName = possibleRealNameSpan.innerText.trim();
+                        break;
+                    }
+                }
+                results.push({ username: username, realName: realName });
+            });
+
+            return results;
+        }''')
+        
+        for item in dados_js:
+            user = item["username"]
+            real = item["realName"]
+            
+            if user and "\n" not in user and len(user) < 35:
+                if user.lower() not in ["seguir", "seguindo", "remover", "solicitado"]:
+                    usuarios_coletados_neste_post[user] = real
+
+        quantidade_atual = len(usuarios_coletados_neste_post)
+        
+        if quantidade_atual == pessoas_carregadas:
+            tentativas_sem_novo_nome += 1
+            if tentativas_sem_novo_nome > 6:
+                log_callback(f"Aguardando carregamento da lista... ({tentativas_sem_novo_nome}/10)")
+        else:
+            tentativas_sem_novo_nome = 0
+            pessoas_carregadas = quantidade_atual
+            log_callback(f"Pares (Usuário+Nome) encontrados até agora: {pessoas_carregadas}")
+            
+            page.evaluate('''
+                const modals = document.querySelectorAll('div[role="dialog"]');
+                const visibleModal = Array.from(modals).reverse().find(m => m.offsetHeight > 0);
+                if (visibleModal) {
+                    const scrollableDiv = Array.from(visibleModal.querySelectorAll('div')).find(
+                        el => getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll'
+                    );
+                    if (scrollableDiv) scrollableDiv.scrollBy(0, 400);
+                }
+            ''')
+        
+        time.sleep(1.2) 
+
+    # Consolida os dados no ranking
+    novas_curtidas = 0
+    for usuario, nome_real in usuarios_coletados_neste_post.items():
+        ranking_engajamento.setdefault(usuario, {"nome_real": "", "curtidas": 0, "comentarios": 0, "urls": set()})
+        
+        # Só atualiza o Nome Real se achou um (para não apagar se ele já existir)
+        if nome_real:
+            ranking_engajamento[usuario]["nome_real"] = nome_real
+            
+        ranking_engajamento[usuario]["curtidas"] += 1
+        ranking_engajamento[usuario]["urls"].add(post_url)
+        novas_curtidas += 1
+
+    log_callback(f"SUCESSO: {novas_curtidas} contas mapeadas neste post.")
+    log_callback("Agora vamos para o mapeamento dos comentários...")
+    return True
+
+def extrair_comentarios(page, ranking_engajamento, log_callback):
+    import time
+    
+    try:
+        page.wait_for_selector('article', timeout=4000)
+    except:
+        log_callback("ERRO: O post não foi detectado na tela.")
+        return False
+
+    post_url = page.url 
+    log_callback(f"Capturando COMENTÁRIOS do link: {post_url}")
+
+    pessoas_carregadas = 0
     tentativas_sem_novo_nome = 0
     usuarios_coletados_neste_post = set()
 
-    # Loop de scroll
-    while tentativas_sem_novo_nome < 6:
-        
-        # O localizador pega quem está visível no HTML NAQUELA fração de segundo
-        elementos = page.locator('div[role="dialog"]:visible span[dir="auto"]').all_inner_texts()
+    while tentativas_sem_novo_nome < 10:
+        elementos = page.locator('article').last.locator('ul li h2 a, ul li h3 a').all_inner_texts()
         
         for user in elementos:
             nome_limpo = user.strip()
             if nome_limpo and "\n" not in nome_limpo and len(nome_limpo) < 35:
-                # Trava extra de segurança: Ignorar textos de botões comuns no modal do Instagram
-                if nome_limpo.lower() not in ["seguir", "seguindo", "remover"]:
-                    usuarios_coletados_neste_post.add(nome_limpo)
+                usuarios_coletados_neste_post.add(nome_limpo)
 
         quantidade_atual = len(usuarios_coletados_neste_post)
+        
         if quantidade_atual == pessoas_carregadas:
             tentativas_sem_novo_nome += 1
         else:
             tentativas_sem_novo_nome = 0
             pessoas_carregadas = quantidade_atual
-            log_callback(f"Usuários encontrados até agora: {pessoas_carregadas}")
-
-        # CORREÇÃO PRINCIPAL: Scroll incremental (desce um pouco por vez em vez de pular para o final)
-        page.evaluate('''
-            const modals = document.querySelectorAll('div[role="dialog"]');
-            const visibleModal = Array.from(modals).find(m => m.offsetHeight > 0);
+            log_callback(f"Comentaristas encontrados até agora: {pessoas_carregadas}")
             
-            if (visibleModal) {
-                const scrollableDiv = Array.from(visibleModal.querySelectorAll('div')).find(
-                    el => getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll'
-                );
-                if (scrollableDiv) {
-                    // Desce aproximadamente a altura de uma "página" visível do modal (400px)
-                    scrollableDiv.scrollBy(0, 400);
+            page.evaluate('''
+                const articles = document.querySelectorAll('article');
+                const visibleArticle = Array.from(articles).reverse().find(a => a.offsetHeight > 0);
+                if (visibleArticle) {
+                    const scrollableDiv = Array.from(visibleArticle.querySelectorAll('*')).find(
+                        el => (getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll') && el.offsetHeight > 100
+                    );
+                    if (scrollableDiv) scrollableDiv.scrollBy(0, 400);
+                    else window.scrollBy(0, 400); 
                 }
-            }
-        ''')
+            ''')
         
-        import time
         time.sleep(1.2) 
 
-    # Consolida os dados no ranking geral
-    novas_curtidas = 0
-    for nome_limpo in usuarios_coletados_neste_post:
-        ranking_engajamento.setdefault(nome_limpo, {"curtidas": 0, "urls": set()})
-        ranking_engajamento[nome_limpo]["curtidas"] += 1
-        ranking_engajamento[nome_limpo]["urls"].add(post_url)
-        novas_curtidas += 1
+    novas_interacoes = 0
+    for usuario in usuarios_coletados_neste_post:
+        # Se a pessoa comentou mas não curtiu, ela é criada aqui com o Nome Real vazio
+        ranking_engajamento.setdefault(usuario, {"nome_real": "", "curtidas": 0, "comentarios": 0, "urls": set()})
+        ranking_engajamento[usuario]["comentarios"] += 1
+        ranking_engajamento[usuario]["urls"].add(post_url)
+        novas_interacoes += 1
 
-    log_callback(f"SUCESSO: {novas_curtidas} curtidas únicas mapeadas neste post.")
-    log_callback("Abra a proxima janela de curtidas (em outro post) e clique em Confirmar.")
-    
-    page.keyboard.press("Escape")
-    time.sleep(1)
+    log_callback(f"SUCESSO: {novas_interacoes} comentaristas únicos mapeados neste post.")
     return True
 
 def salvar_relatorio(ranking_engajamento, log_callback):
+    import pandas as pd
+    
     dados_finais = []
-    for nome, dados in ranking_engajamento.items():
+    for usuario, dados in ranking_engajamento.items():
         urls_formatadas = ", ".join(dados["urls"])
+        
         dados_finais.append(
             {
-                "Nome_Usuario": nome,
+                "Usuario_Instagram": usuario,
+                "Nome_Real": dados["nome_real"],
                 "Qtd_Curtidas": dados["curtidas"],
+                "Qtd_Comentarios": dados["comentarios"],
+                "Engajamento_Total": dados["curtidas"] + dados["comentarios"],
                 "URLs_dos_Posts": urls_formatadas,
             }
         )
 
     if dados_finais:
         df = pd.DataFrame(dados_finais)
-        # Ordena para quem curtiu mais vezes ficar no topo
-        df = df.sort_values(by="Qtd_Curtidas", ascending=False)
+        df = df.sort_values(by="Engajamento_Total", ascending=False)
         df.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
         df.to_excel(EXCEL_FILE, index=False, engine="openpyxl")
         log_callback(f"SUCESSO: {len(dados_finais)} contas unicas coletadas.")
         log_callback(f"Arquivos gerados: {CSV_FILE} e {EXCEL_FILE}")
     else:
-        log_callback("Nenhum dado de engajamento foi coletado ou não rolou o STOP.")
-
+        log_callback("Nenhum dado de engajamento foi coletado.")
 
 class InstagramRunner:
     def __init__(self, log_callback, waiting_callback, finished_callback):
@@ -159,68 +254,68 @@ class InstagramRunner:
                 page = context.new_page()
 
                 self.log_callback(f"Acessando: {INSTAGRAM_URL}")
-                page.goto(INSTAGRAM_URL, wait_until="networkidle") # Espera a rede sossegar
-                time.sleep(3)
+                # Usamos domcontentloaded para evitar o erro de timeout do Instagram
+                page.goto(INSTAGRAM_URL, wait_until="domcontentloaded")
+                time.sleep(4)
 
-                # --- NOVA LÓGICA DE VERIFICAÇÃO DE LOGIN ---
-                # Procuramos por elementos que confirmam que você ESTÁ logado
-                # (Ícone de Home, Ícone de Explorar ou Ícone de Perfil)
+                # --- Verificação de Login ---
                 try:
-                    # Tenta esperar 5 segundos por um seletor de usuário logado
                     page.wait_for_selector('svg[aria-label="Página inicial"], svg[aria-label="Direct"]', timeout=5000)
-                    precisa_logar = False
-                    self.log_callback("Sessão recuperada com sucesso!")
+                    self.log_callback("Sessão ativa detectada.")
                 except:
-                    precisa_logar = True
-
-                if precisa_logar:
-                    self.log_callback("Login automático falhou ou expirou. Por favor, faça login manualmente.")
-                    page.goto("https://www.instagram.com/accounts/login/", wait_until="domcontentloaded")
-                    
-                    if not self._wait_for_confirm("Após fazer o login e chegar na tela inicial, clique em 'Confirmar'."):
+                    self.log_callback("Login necessário. Por favor, logue no Chrome.")
+                    if not self._wait_for_confirm("Após logar e chegar na Home, clique em 'Confirmar'."):
                         return
-                    
-                    # AGUARDA O USUÁRIO REALMENTE ESTAR NA HOME ANTES DE SALVAR
-                    self.log_callback("Validando login e salvando estado...")
-                    try:
-                        page.wait_for_selector('svg[aria-label="Página inicial"]', timeout=10000)
-                        time.sleep(2) # Pausa técnica para o Instagram terminar de setar os cookies
-                        context.storage_state(path=str(STORAGE_STATE))
-                        self.log_callback("Estado de login salvo para a próxima vez.")
-                    except:
-                        self.log_callback("AVISO: Login feito, mas não consegui confirmar a Home Page. O auto-login pode falhar na próxima vez.")
-                
-                # RE-SALVAR ESTADO SEMPRE (opcional, mas recomendado para renovar cookies)
-                context.storage_state(path=str(STORAGE_STATE))
-                
-                contador_posts = 0
-                self.log_callback("Coleta iniciada. Abra as curtidas no Instagram e clique em Confirmar.")
+                    context.storage_state(path=str(STORAGE_STATE))
 
-                # Loop de posts
+                contador_posts = 0
+                self.log_callback("Iniciando coleta em duas etapas (Curtidas e depois Comentários).")
+
+                # --- LOOP PRINCIPAL POR POST ---
                 while not self._stop_event.is_set():
-                    prompt = f"[Post {contador_posts + 1}] Modal de curtidas ABERTO? Clique em Confirmar."
-                    if not self._wait_for_confirm(prompt):
+                    indice_post = contador_posts + 1
+                    
+                    # ETAPA 1: CURTIDAS
+                    prompt_curtidas = f"[Post {indice_post} - ETAPA 1/2] Abra o modal de CURTIDAS e clique em Confirmar."
+                    if not self._wait_for_confirm(prompt_curtidas):
                         break
                     if self._stop_event.is_set():
                         break
-
+                    
+                    self.log_callback(f"Processando curtidas do Post {indice_post}...")
                     sucesso_curtidas = extrair_curtidas(page, ranking_engajamento, self.log_callback)
-                    if sucesso_curtidas:
-                        contador_posts += 1
+                    
+                    if self._stop_event.is_set():
+                        break
 
-                self.log_callback("Finalizando coleta e encerrando navegador...")
-                browser.close()
+                    # ETAPA 2: COMENTÁRIOS
+                    # Note: extrair_curtidas já aperta 'Escape' ao final, então o modal fecha sozinho.
+                    prompt_comentarios = f"[Post {indice_post} - ETAPA 2/2] Modal de curtidas fechado. Agora role os COMENTÁRIOS e clique em Confirmar."
+                    if not self._wait_for_confirm(prompt_comentarios):
+                        break
+                    if self._stop_event.is_set():
+                        break
+                    
+                    self.log_callback(f"Processando comentários do Post {indice_post}...")
+                    sucesso_comentarios = extrair_comentarios(page, ranking_engajamento, self.log_callback)
+
+                    # Finalização do Post atual
+                    if sucesso_curtidas or sucesso_comentarios:
+                        contador_posts += 1
+                        self.log_callback(f"✅ Post {contador_posts} finalizado com sucesso!")
+                        self.log_callback("Pule para o próximo post no Instagram e aguarde o próximo prompt.")
+
+                self.log_callback("Encerrando navegador e salvando dados...")
+                if browser:
+                    browser.close()
                 browser = None
 
-            # O salvamento do relatório roda após o fechamento do browser (seja clicando em Stop ou finalizando)
+            # Gera o Excel/CSV final
             salvar_relatorio(ranking_engajamento, self.log_callback)
 
         except Exception as exc:
-            self.log_callback(f"Erro inesperado: {exc}")
+            self.log_callback(f"Erro inesperado no motor: {exc}")
         finally:
-            if browser is not None:
-                try:
-                    browser.close()
-                except:
-                    pass
+            if browser:
+                browser.close()
             self.finished_callback()

@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
+import tksvg
 
 from instagram.instagram import InstagramRunner
 from scraper.linkedin import LinkedInRunner
@@ -9,10 +10,11 @@ class RoundedButton(tk.Canvas):
     def __init__(
         self,
         parent,
-        text,
-        command,
+        text="",
+        command=None,
         width=170,
         height=44,
+        image=None,
         radius=16,
         bg="#2F81F7",
         fg="white",
@@ -27,6 +29,7 @@ class RoundedButton(tk.Canvas):
         self._command = command
         self._width = width
         self._height = height
+        self._image = image
         self._radius = radius
         self._bg = bg
         self._fg = fg
@@ -45,8 +48,21 @@ class RoundedButton(tk.Canvas):
         self.bind("<Leave>", self._on_leave)
         self.bind("<Button-1>", self._on_click)
 
+        # CORREÇÃO: Usando self._image e self._text com o underline
+        if self._image:
+            self.create_image(width/2, height/2, image=self._image, anchor="center")
+        elif self._text:
+            self._text_id = self.create_text(width/2, height/2, text=self._text, fill=self._fg, font=self._font)
+
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+        
     def _draw(self):
+        
         self.delete("all")
+
+        
         fill_color, text_color = self._current_colors()
         self._shape_id = self._create_round_rect(
             1, 1, self._width - 1, self._height - 1, self._radius, fill=fill_color, outline=""
@@ -54,6 +70,15 @@ class RoundedButton(tk.Canvas):
         self._text_id = self.create_text(
             self._width / 2, self._height / 2, text=self._text, fill=text_color, font=self._font
         )
+        if self._image:
+            self.create_image(self._width/2, self._height/2, image=self._image, anchor="center")
+        elif self._text:
+            # Pega a cor certa dependendo se o botão está desativado ou não
+            cor_texto = self._disabled_fg if self._state == "disabled" else self._fg
+            self._text_id = self.create_text(
+                self._width/2, self._height/2, 
+                text=self._text, fill=cor_texto, font=self._font
+            )
 
     def _create_round_rect(self, x1, y1, x2, y2, r, **kwargs):
         points = [
@@ -175,38 +200,39 @@ class AppGUI:
 
         RoundedButton(
             cards,
-            text="LinkedIn\nDisponivel",
+            text="in",
             command=lambda: self.show_automation_page("linkedin"),
             bg="#0A66C2",
             hover_bg="#0D74DE",
             width=190,
             height=84,
             radius=22,
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 18, "bold"),
         ).grid(row=0, column=0, padx=(0, 14), pady=8, sticky="w")
 
+        self.ig_icon = tksvg.SvgImage(file="ui/assets/logo_instagram.svg", scaletowidth=40)
         RoundedButton(
             cards,
-            text="Instagram\nDisponivel",
+            image=self.ig_icon,
             command=lambda: self.show_automation_page("instagram"),
             bg="#C13584",
             hover_bg="#D94A96",
             width=190,
             height=84,
             radius=22,
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI Symbol", 18, "bold"),
         ).grid(row=0, column=1, padx=14, pady=8, sticky="w")
 
         RoundedButton(
             cards,
-            text="Facebook\nEm breve",
+            text="f\nEm breve",
             command=lambda: None,
             state="disabled",
             width=190,
             height=84,
             radius=22,
             bg="#8C959F",
-            font=("Segoe UI", 11),
+            font=("Segoe UI", 18, "bold"),
         ).grid(row=0, column=2, padx=14, pady=8, sticky="w")
 
     def _build_automation_page(self):
