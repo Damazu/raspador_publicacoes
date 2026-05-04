@@ -8,13 +8,13 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 URL = "https://www.linkedin.com/company/houer/posts/?feedView=all&sortBy=RECENT"
-EXCEL_FILE = "ranking_engajamento.xlsx"
-CSV_FILE = "ranking_engajamento.csv"
+EXCEL_FILE = "ranking_engajamento_linkedin.xlsx"
+CSV_FILE = "ranking_engajamento_linkedin.csv"
 STORAGE_STATE = Path("linkedin_state.json")
 
 
-def garantir_pessoa(ranking_engajamento, nome):
-    ranking_engajamento.setdefault(
+def garantir_pessoa(ranking_engajamento_linkedin, nome):
+    ranking_engajamento_linkedin.setdefault(
         nome,
         {
             "reacoes": 0,
@@ -66,7 +66,7 @@ def obter_url_post_ativo(page):
     return "URL nao identificada"
 
 
-def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
+def extrair_reacoes(page, ranking_engajamento_linkedin, post_url, log_callback):
     base_modal_selector = "div[role='dialog'].social-details-reactors-modal"
     modal = page.locator(base_modal_selector).first
 
@@ -106,9 +106,9 @@ def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
     for texto in elementos_nome:
         nome_limpo = texto.split("\n")[0].strip()
         if nome_limpo:
-            garantir_pessoa(ranking_engajamento, nome_limpo)
-            ranking_engajamento[nome_limpo]["reacoes"] += 1
-            ranking_engajamento[nome_limpo]["urls"].add(post_url)
+            garantir_pessoa(ranking_engajamento_linkedin, nome_limpo)
+            ranking_engajamento_linkedin[nome_limpo]["reacoes"] += 1
+            ranking_engajamento_linkedin[nome_limpo]["urls"].add(post_url)
             novas_reacoes += 1
 
     log_callback(f"{novas_reacoes} reacoes mapeadas neste post.")
@@ -118,7 +118,7 @@ def extrair_reacoes(page, ranking_engajamento, post_url, log_callback):
     return True
 
 
-def extrair_compartilhamentos(page, ranking_engajamento, post_url, log_callback):
+def extrair_compartilhamentos(page, ranking_engajamento_linkedin, post_url, log_callback):
     base_modal_selector = "div[role='dialog'].social-details-social-activity-modal"
     modal = page.locator(base_modal_selector).first
 
@@ -183,15 +183,15 @@ def extrair_compartilhamentos(page, ranking_engajamento, post_url, log_callback)
             )
         )
 
-        garantir_pessoa(ranking_engajamento, nome_limpo)
+        garantir_pessoa(ranking_engajamento_linkedin, nome_limpo)
         if possui_pensamento:
-            ranking_engajamento[nome_limpo]["compartilhamentos_com_pensamentos"] += 1
+            ranking_engajamento_linkedin[nome_limpo]["compartilhamentos_com_pensamentos"] += 1
             com_pensamentos += 1
         else:
-            ranking_engajamento[nome_limpo]["compartilhamentos_sem_pensamentos"] += 1
+            ranking_engajamento_linkedin[nome_limpo]["compartilhamentos_sem_pensamentos"] += 1
             sem_pensamentos += 1
 
-        ranking_engajamento[nome_limpo]["urls"].add(post_url)
+        ranking_engajamento_linkedin[nome_limpo]["urls"].add(post_url)
         vistos.add(nome_limpo)
 
     log_callback(
@@ -202,7 +202,7 @@ def extrair_compartilhamentos(page, ranking_engajamento, post_url, log_callback)
     return True
 
 
-def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
+def extrair_comentarios(page, ranking_engajamento_linkedin, post_url, log_callback):
     try:
         log_callback(f"Iniciando raspagem de comentários estrutural...")
 
@@ -289,9 +289,9 @@ def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
             
             # if nome_limpo.lower() == "houer": continue 
             
-            garantir_pessoa(ranking_engajamento, nome_limpo)
-            ranking_engajamento[nome_limpo]["comentarios"] += 1
-            ranking_engajamento[nome_limpo]["urls"].add(post_url)
+            garantir_pessoa(ranking_engajamento_linkedin, nome_limpo)
+            ranking_engajamento_linkedin[nome_limpo]["comentarios"] += 1
+            ranking_engajamento_linkedin[nome_limpo]["urls"].add(post_url)
             novos_comentarios += 1
 
         log_callback(f"SUCESSO: {novos_comentarios} comentários únicos mapeados neste post.")
@@ -301,9 +301,9 @@ def extrair_comentarios(page, ranking_engajamento, post_url, log_callback):
         log_callback(f"Erro ao extrair comentários: {e}")
         return False
 
-def salvar_relatorio(ranking_engajamento, log_callback):
+def salvar_relatorio(ranking_engajamento_linkedin, log_callback):
     dados_finais = []
-    for nome, dados in ranking_engajamento.items():
+    for nome, dados in ranking_engajamento_linkedin.items():
         total_engajamento = (
             dados["reacoes"]
             + dados["comentarios"]
@@ -412,7 +412,7 @@ class LinkedInRunner:
         return False
 
     def _run(self):
-        ranking_engajamento = {}
+        ranking_engajamento_linkedin = {}
         browser = None
 
         try:
@@ -488,7 +488,7 @@ class LinkedInRunner:
                         break
 
                     post_url = obter_url_post_ativo(page)
-                    sucesso_reacoes = extrair_reacoes(page, ranking_engajamento, post_url, self.log_callback)
+                    sucesso_reacoes = extrair_reacoes(page, ranking_engajamento_linkedin, post_url, self.log_callback)
                     self._notify_stage("etapa1_concluida")
 
                     if self._consume_skip_request():
@@ -516,7 +516,7 @@ class LinkedInRunner:
                         self._notify_stage("aguardando_etapa1")
                         continue
 
-                    sucesso_comentarios = extrair_comentarios(page, ranking_engajamento, post_url, self.log_callback)
+                    sucesso_comentarios = extrair_comentarios(page, ranking_engajamento_linkedin, post_url, self.log_callback)
                     if self._consume_skip_request():
                         if sucesso_reacoes or sucesso_comentarios:
                             contador_posts += 1
@@ -543,7 +543,7 @@ class LinkedInRunner:
                         continue
 
                     sucesso_compartilhamentos = extrair_compartilhamentos(
-                        page, ranking_engajamento, post_url, self.log_callback
+                        page, ranking_engajamento_linkedin, post_url, self.log_callback
                     )
 
                     if sucesso_reacoes or sucesso_comentarios or sucesso_compartilhamentos:
@@ -583,7 +583,7 @@ class LinkedInRunner:
                 browser.close()
                 browser = None
 
-            salvar_relatorio(ranking_engajamento, self.log_callback)
+            salvar_relatorio(ranking_engajamento_linkedin, self.log_callback)
             
         except Exception as exc:
             self.log_callback(f"Erro inesperado: {exc}")
