@@ -11,7 +11,6 @@ CSV_FILE = "ranking_engajamento_instagram.csv"
 STORAGE_STATE = Path("instagram_state.json")
 
 def extrair_curtidas(page, ranking_engajamento, log_callback):
-    # CORREÇÃO 1: Adicionamos ':visible' para ignorar qualquer modal fantasma/oculto no HTML
     try:
         page.wait_for_selector('div[role="dialog"]:visible', timeout=3000)
     except:
@@ -20,22 +19,25 @@ def extrair_curtidas(page, ranking_engajamento, log_callback):
 
     post_url = page.url 
     log_callback(f"Capturando curtidas do link: {post_url}")
-    log_callback("Modal detectado. Rolando para carregar todas as curtidas...")
+    log_callback("Modal detectado. Rolando em pequenos passos para não pular ninguém...")
 
     pessoas_carregadas = 0
+    # Aumentei para 6 tentativas, pois como o passo é menor, às vezes pode demorar um pouco mais para carregar
     tentativas_sem_novo_nome = 0
     usuarios_coletados_neste_post = set()
 
     # Loop de scroll
-    while tentativas_sem_novo_nome < 4:
-        # CORREÇÃO 2: Busca os textos apenas dentro do modal que está efetivamente visível
+    while tentativas_sem_novo_nome < 6:
+        
+        # O localizador pega quem está visível no HTML NAQUELA fração de segundo
         elementos = page.locator('div[role="dialog"]:visible span[dir="auto"]').all_inner_texts()
         
         for user in elementos:
             nome_limpo = user.strip()
-            # Filtra textos genéricos vazios ou textos grandes que não são arrobas
             if nome_limpo and "\n" not in nome_limpo and len(nome_limpo) < 35:
-                usuarios_coletados_neste_post.add(nome_limpo)
+                # Trava extra de segurança: Ignorar textos de botões comuns no modal do Instagram
+                if nome_limpo.lower() not in ["seguir", "seguindo", "remover"]:
+                    usuarios_coletados_neste_post.add(nome_limpo)
 
         quantidade_atual = len(usuarios_coletados_neste_post)
         if quantidade_atual == pessoas_carregadas:
@@ -45,7 +47,7 @@ def extrair_curtidas(page, ranking_engajamento, log_callback):
             pessoas_carregadas = quantidade_atual
             log_callback(f"Usuários encontrados até agora: {pessoas_carregadas}")
 
-        # CORREÇÃO 3: O JavaScript agora encontra o modal visível na tela (offsetHeight > 0)
+        # CORREÇÃO PRINCIPAL: Scroll incremental (desce um pouco por vez em vez de pular para o final)
         page.evaluate('''
             const modals = document.querySelectorAll('div[role="dialog"]');
             const visibleModal = Array.from(modals).find(m => m.offsetHeight > 0);
@@ -55,11 +57,14 @@ def extrair_curtidas(page, ranking_engajamento, log_callback):
                     el => getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll'
                 );
                 if (scrollableDiv) {
-                    scrollableDiv.scrollTop = scrollableDiv.scrollHeight;
+                    // Desce aproximadamente a altura de uma "página" visível do modal (400px)
+                    scrollableDiv.scrollBy(0, 400);
                 }
             }
         ''')
-        time.sleep(1.5) # Tempo para o Instagram carregar a listagem (aumente se sua internet oscilar)
+        
+        import time
+        time.sleep(1.2) 
 
     # Consolida os dados no ranking geral
     novas_curtidas = 0
@@ -69,10 +74,9 @@ def extrair_curtidas(page, ranking_engajamento, log_callback):
         ranking_engajamento[nome_limpo]["urls"].add(post_url)
         novas_curtidas += 1
 
-    log_callback(f"{novas_curtidas} curtidas mapeadas neste post.")
+    log_callback(f"SUCESSO: {novas_curtidas} curtidas únicas mapeadas neste post.")
     log_callback("Abra a proxima janela de curtidas (em outro post) e clique em Confirmar.")
     
-    # Tenta fechar o modal apertando Esc para facilitar sua vida na navegação
     page.keyboard.press("Escape")
     time.sleep(1)
     return True
@@ -147,6 +151,7 @@ class InstagramRunner:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=False, channel="chrome")
                 ctx_opts = {"locale": "pt-BR", "viewport": {"width": 1280, "height": 800}}
+                
                 if STORAGE_STATE.is_file():
                     ctx_opts["storage_state"] = str(STORAGE_STATE)
 
@@ -154,30 +159,42 @@ class InstagramRunner:
                 page = context.new_page()
 
                 self.log_callback(f"Acessando: {INSTAGRAM_URL}")
-                page.goto(INSTAGRAM_URL, wait_until="domcontentloaded")
-                time.sleep(4)
+                page.goto(INSTAGRAM_URL, wait_until="networkidle") # Espera a rede sossegar
+                time.sleep(3)
 
-                # Verifica Login
-                precisa_logar = False
-                if "/accounts/login" in page.url or "login" in page.url:
+                # --- NOVA LÓGICA DE VERIFICAÇÃO DE LOGIN ---
+                # Procuramos por elementos que confirmam que você ESTÁ logado
+                # (Ícone de Home, Ícone de Explorar ou Ícone de Perfil)
+                try:
+                    # Tenta esperar 5 segundos por um seletor de usuário logado
+                    page.wait_for_selector('svg[aria-label="Página inicial"], svg[aria-label="Direct"]', timeout=5000)
+                    precisa_logar = False
+                    self.log_callback("Sessão recuperada com sucesso!")
+                except:
                     precisa_logar = True
-                else:
-                    try:
-                        page.locator('input[name="username"]').first.wait_for(state="visible", timeout=3000)
-                        precisa_logar = True
-                    except:
-                        pass
 
                 if precisa_logar:
-                    self.log_callback("Instagram pediu login. Faca login no Chrome.")
+                    self.log_callback("Login automático falhou ou expirou. Por favor, faça login manualmente.")
                     page.goto("https://www.instagram.com/accounts/login/", wait_until="domcontentloaded")
-                    if not self._wait_for_confirm("Depois de logar, clique em 'Confirmar'."):
+                    
+                    if not self._wait_for_confirm("Após fazer o login e chegar na tela inicial, clique em 'Confirmar'."):
                         return
-                    time.sleep(3)
-
+                    
+                    # AGUARDA O USUÁRIO REALMENTE ESTAR NA HOME ANTES DE SALVAR
+                    self.log_callback("Validando login e salvando estado...")
+                    try:
+                        page.wait_for_selector('svg[aria-label="Página inicial"]', timeout=10000)
+                        time.sleep(2) # Pausa técnica para o Instagram terminar de setar os cookies
+                        context.storage_state(path=str(STORAGE_STATE))
+                        self.log_callback("Estado de login salvo para a próxima vez.")
+                    except:
+                        self.log_callback("AVISO: Login feito, mas não consegui confirmar a Home Page. O auto-login pode falhar na próxima vez.")
+                
+                # RE-SALVAR ESTADO SEMPRE (opcional, mas recomendado para renovar cookies)
                 context.storage_state(path=str(STORAGE_STATE))
+                
                 contador_posts = 0
-                self.log_callback("Coleta iniciada. Navegue até o post, ABRA as curtidas e clique em Confirmar.")
+                self.log_callback("Coleta iniciada. Abra as curtidas no Instagram e clique em Confirmar.")
 
                 # Loop de posts
                 while not self._stop_event.is_set():
