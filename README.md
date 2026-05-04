@@ -126,7 +126,8 @@ Filename: "{app}\raspador_linkedin.exe"; Description: "Abrir Raspador LinkedIn";
 
 - `app.py`: ponto de entrada da aplicacao.
 - `ui/app_gui.py`: toda a interface grafica (telas e botoes).
-- `scraper/linkedin.py`: toda a logica de scraping do LinkedIn.
+- `linkedin/linkedin.py`: toda a logica de scraping do LinkedIn.
+- `instagram/instagram.py`: logica de scraping do Instagram.
 
 ## Interface grafica
 

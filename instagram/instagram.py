@@ -27,7 +27,7 @@ def extrair_curtidas(page, ranking_engajamento, log_callback):
     # Agora usamos um dicionário local para guardar { "usuario": "Nome Real" }
     usuarios_coletados_neste_post = {}
 
-    while tentativas_sem_novo_nome < 12:
+    while tentativas_sem_novo_nome < 10:
         
         # A MÁGICA DE VÍNCULO NO JAVASCRIPT:
         # Ele captura o @usuario e "sobe" no HTML para encontrar o Nome Real da mesma linha

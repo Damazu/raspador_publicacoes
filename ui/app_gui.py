@@ -3,7 +3,7 @@ from tkinter import messagebox, scrolledtext
 import tksvg
 
 from instagram.instagram import InstagramRunner
-from scraper.linkedin import LinkedInRunner
+from linkedin.linkedin import LinkedInRunner
 
 
 class RoundedButton(tk.Canvas):
