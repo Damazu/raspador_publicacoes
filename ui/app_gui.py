@@ -296,7 +296,7 @@ class AppGUI:
 
         self.btn_sair = RoundedButton(
             botoes,
-            text="Sair",
+            text="Finalizar",
             command=self.stop_current_runner,
             state="disabled",
             bg="#CF222E",

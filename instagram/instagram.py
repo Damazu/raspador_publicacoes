@@ -10,9 +10,25 @@ EXCEL_FILE = "ranking_engajamento_instagram.xlsx"
 CSV_FILE = "ranking_engajamento_instagram.csv"
 STORAGE_STATE = Path("instagram_state.json")
 
+def safe_page_evaluate(page, script, retries=2, wait_seconds=1.0):
+    for tentativa in range(retries + 1):
+        try:
+            return page.evaluate(script)
+        except PlaywrightError as exc:
+            mensagem = str(exc).lower()
+            if "execution context was destroyed" in mensagem or "most likely because of a navigation" in mensagem:
+                if tentativa >= retries:
+                    raise
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=4000)
+                except Exception:
+                    pass
+                time.sleep(wait_seconds)
+                continue
+            raise
+
+
 def extrair_curtidas(page, ranking_engajamento, log_callback):
-    import time
-    
     try:
         page.wait_for_selector('div[role="dialog"]:visible', timeout=4000)
     except:
@@ -83,19 +99,33 @@ def extrair_curtidas(page, ranking_engajamento, log_callback):
             tentativas_sem_novo_nome = 0
             pessoas_carregadas = quantidade_atual
             log_callback(f"Pares (Usuário+Nome) encontrados até agora: {pessoas_carregadas}")
+
+        # Rola sempre, mesmo sem novos nomes, para forcar carregar o restante.
+        safe_page_evaluate(page, '''() => {
+            const modals = document.querySelectorAll('div[role="dialog"]');
+            const visibleModal = Array.from(modals).reverse().find(m => m.offsetHeight > 0);
+            if (!visibleModal) return;
             
-            page.evaluate('''
-                const modals = document.querySelectorAll('div[role="dialog"]');
-                const visibleModal = Array.from(modals).reverse().find(m => m.offsetHeight > 0);
-                if (visibleModal) {
-                    const scrollableDiv = Array.from(visibleModal.querySelectorAll('div')).find(
-                        el => getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll'
-                    );
-                    if (scrollableDiv) scrollableDiv.scrollBy(0, 400);
-                }
-            ''')
-        
-        time.sleep(1.2) 
+            // 1. Busca exatamente a div com o estilo de rolagem que você encontrou no HTML
+            let scrollableDiv = visibleModal.querySelector('div[style*="overflow: hidden auto"], div[style*="overflow-y: auto"]');
+            
+            // Fallback de segurança caso o Instagram mude o estilo inline
+            if (!scrollableDiv) {
+                scrollableDiv = Array.from(visibleModal.querySelectorAll('div')).find(
+                    el => getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll'
+                );
+            }
+            
+            if (scrollableDiv) {
+                // 2. No React, alterar o scrollTop diretamente costuma ser mais confiável que o scrollBy
+                scrollableDiv.scrollTop += 400;
+                
+                // 3. O SEGREDO: Dispara um evento fantasma avisando o React que a tela rolou
+                // Isso força o Instagram a desenhar as próximas arrobas na tela
+                scrollableDiv.dispatchEvent(new Event('scroll', { bubbles: true }));
+            }
+        }''')
+        time.sleep(1.2)
 
     # Consolida os dados no ranking
     novas_curtidas = 0
@@ -112,11 +142,11 @@ def extrair_curtidas(page, ranking_engajamento, log_callback):
 
     log_callback(f"SUCESSO: {novas_curtidas} contas mapeadas neste post.")
     log_callback("Agora vamos para o mapeamento dos comentários...")
+    page.keyboard.press("Escape")
+    time.sleep(1)
     return True
 
 def extrair_comentarios(page, ranking_engajamento, log_callback):
-    import time
-    
     try:
         page.wait_for_selector('article', timeout=4000)
     except:
@@ -146,19 +176,21 @@ def extrair_comentarios(page, ranking_engajamento, log_callback):
             tentativas_sem_novo_nome = 0
             pessoas_carregadas = quantidade_atual
             log_callback(f"Comentaristas encontrados até agora: {pessoas_carregadas}")
-            
-            page.evaluate('''
-                const articles = document.querySelectorAll('article');
-                const visibleArticle = Array.from(articles).reverse().find(a => a.offsetHeight > 0);
-                if (visibleArticle) {
-                    const scrollableDiv = Array.from(visibleArticle.querySelectorAll('*')).find(
-                        el => (getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll') && el.offsetHeight > 100
-                    );
-                    if (scrollableDiv) scrollableDiv.scrollBy(0, 400);
-                    else window.scrollBy(0, 400); 
-                }
-            ''')
-        
+
+        # Mesmo comportamento do LinkedIn: rola continuamente ate estabilizar.
+        safe_page_evaluate(page, '''() => {
+            const articles = document.querySelectorAll('article');
+            const visibleArticle = Array.from(articles).reverse().find(a => a.offsetHeight > 0);
+            if (!visibleArticle) {
+                window.scrollBy(0, 500);
+                return;
+            }
+            const scrollableDiv = Array.from(visibleArticle.querySelectorAll('*')).find(
+                el => (getComputedStyle(el).overflowY === 'auto' || getComputedStyle(el).overflowY === 'scroll') && el.offsetHeight > 100
+            );
+            if (scrollableDiv) scrollableDiv.scrollBy(0, 500);
+            else window.scrollBy(0, 500);
+        }''')
         time.sleep(1.2) 
 
     novas_interacoes = 0
