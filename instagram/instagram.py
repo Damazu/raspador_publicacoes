@@ -293,9 +293,9 @@ class InstagramRunner:
                 # --- Verificação de Login ---
                 try:
                     page.wait_for_selector('svg[aria-label="Página inicial"], svg[aria-label="Direct"]', timeout=5000)
-                    self.log_callback("Sessão ativa detectada.")
+                    self.log_callback(f"Sessão ativa detectada. Selecione o post e selecione 'Curtidas' e clique em 'Confirmar'.")
                 except:
-                    self.log_callback("Login necessário. Por favor, logue no Chrome.")
+                    self.log_callback("Login necessário. Por favor, logue no Chrome. Ao finalizar, clique em 'Confirmar'.")
                     if not self._wait_for_confirm("Após logar e chegar na Home, clique em 'Confirmar'."):
                         return
                     context.storage_state(path=str(STORAGE_STATE))
