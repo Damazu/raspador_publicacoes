@@ -69,13 +69,13 @@ Se quiser distribuir o app sem exigir que a pessoa rode `python app.py`, gere um
 pip install pyinstaller
 ```
 
-2. Gere o build:
+1. Gere o build:
 
 ```bash
-python -m PyInstaller --noconfirm --windowed --name raspador_linkedin --collect-all playwright app.py
+python -m PyInstaller --noconfirm --windowed --name raspador_social_media --collect-all playwright --collect-all tksvg --add-data "ui/assets;ui/assets" app.py
 ```
 
-3. Arquivo gerado:
+1. Arquivo gerado:
 
 - `dist/raspador_linkedin/raspador_linkedin.exe`
 
