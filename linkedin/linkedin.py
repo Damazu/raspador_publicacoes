@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from paths_utils import pasta_area_trabalho
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -345,10 +346,11 @@ def salvar_relatorio(ranking_engajamento_linkedin, log_callback):
     if dados_finais:
         df = pd.DataFrame(dados_finais)
         df = df.sort_values(by="Engajamento_Total", ascending=False)
+        caminho_excel = pasta_area_trabalho() / EXCEL_FILE
         df.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
-        df.to_excel(EXCEL_FILE, index=False, engine="openpyxl")
+        df.to_excel(caminho_excel, index=False, engine="openpyxl")
         log_callback(f"SUCESSO: {len(dados_finais)} pessoas no ranking.")
-        log_callback(f"Arquivos gerados: {CSV_FILE} e {EXCEL_FILE}")
+        log_callback(f"Arquivos gerados: {CSV_FILE} (pasta do projeto) e {caminho_excel.resolve()} (Excel na area de trabalho)")
     else:
         log_callback("Nenhum dado de engajamento foi coletado.")
 
