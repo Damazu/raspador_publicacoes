@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from paths_utils import pasta_area_trabalho
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -25,7 +26,6 @@ def garantir_pessoa(ranking_engajamento_linkedin, nome):
         },
     )
 
-
 def safe_page_evaluate(page, script, retries=2, wait_seconds=1.2):
     for tentativa in range(retries + 1):
         try:
@@ -42,7 +42,6 @@ def safe_page_evaluate(page, script, retries=2, wait_seconds=1.2):
                 time.sleep(wait_seconds)
                 continue
             raise
-
 
 def obter_url_post_ativo(page):
     urn = safe_page_evaluate(page, """() => {
@@ -64,7 +63,6 @@ def obter_url_post_ativo(page):
     if urn:
         return f"https://www.linkedin.com/feed/update/{urn}/"
     return "URL nao identificada"
-
 
 def extrair_reacoes(page, ranking_engajamento_linkedin, post_url, log_callback):
     base_modal_selector = "div[role='dialog'].social-details-reactors-modal"
@@ -117,23 +115,30 @@ def extrair_reacoes(page, ranking_engajamento_linkedin, post_url, log_callback):
     time.sleep(1)
     return True
 
-
 def extrair_compartilhamentos(page, ranking_engajamento_linkedin, post_url, log_callback):
-    base_modal_selector = "div[role='dialog'].social-details-social-activity-modal"
-    modal = page.locator(base_modal_selector).first
-
-    if not modal.is_visible():
+    # 1. Atualizado para a classe específica do modal de compartilhamentos (Reposts)
+    base_modal_selector = "div[role='dialog'].feed-modals-reposts-modal"
+    
+    try:
+        log_callback("Aguardando a janela de compartilhamentos abrir...")
+        # Usamos wait_for_selector para maior estabilidade, igual recomendado antes
+        page.wait_for_selector(base_modal_selector, state="visible", timeout=5000)
+    except PlaywrightTimeoutError:
         log_callback("ERRO: A janela de compartilhamentos nao esta aberta.")
         return False
 
-    log_callback("Janela de compartilhamentos detectada. Rolando para carregar todos os nomes...")
+    log_callback(f"Link identificado: {post_url}")
+    log_callback("Janela de compartilhamentos detectada. Rolando para carregar todos os posts...")
 
+    # 2. Seletores de rolagem e dos cards (publicações compartilhadas)
     seletor_scroll = f"{base_modal_selector} .artdeco-modal__content"
-    seletor_cards = f"{base_modal_selector} li, {base_modal_selector} .artdeco-entity-lockup"
+    # Cada compartilhamento no LinkedIn é encapsulado nesta classe específica
+    seletor_cards = f"{base_modal_selector} .feed-shared-update-v2"
 
     quantidade_anterior = 0
     tentativas_sem_novidade = 0
 
+    # 3. Lógica de Infinite Scroll (Idêntica à de reações)
     while tentativas_sem_novidade < 3:
         quantidade_atual = page.locator(seletor_cards).count()
         if quantidade_atual == quantidade_anterior:
@@ -142,15 +147,17 @@ def extrair_compartilhamentos(page, ranking_engajamento_linkedin, post_url, log_
             tentativas_sem_novidade = 0
             quantidade_anterior = quantidade_atual
 
+        # Rolagem via JavaScript focada no container interno do modal
         safe_page_evaluate(
             page,
             f"""
             var objDiv = document.querySelector("{seletor_scroll}");
             if(objDiv) {{ objDiv.scrollTop = objDiv.scrollHeight; }}
-        """,
+            """
         )
         time.sleep(1.5)
 
+    # 4. Processamento dos Cards Carregados
     cards = page.locator(seletor_cards)
     total_cards = cards.count()
     vistos = set()
@@ -158,32 +165,41 @@ def extrair_compartilhamentos(page, ranking_engajamento_linkedin, post_url, log_
     sem_pensamentos = 0
 
     for i in range(total_cards):
-        texto_card = cards.nth(i).inner_text().strip()
-        if not texto_card:
-            continue
+        card = cards.nth(i)
+        
+        # Busca pelo indicador de "Sem ideia" (Repost simples, classe header padrão)
+        header_sem_ideia = card.locator(".update-components-header__text-view")
+        
+        if header_sem_ideia.count() > 0:
+            possui_pensamento = False
+            nome_locator = header_sem_ideia.locator("a").first
+            if nome_locator.count() > 0:
+                nome_limpo = nome_locator.inner_text().strip()
+            else:
+                continue
+                
+        else:
+            # Caso contrário, é "Com ideia" (Post com comentário / Quote)
+            possui_pensamento = True
+            # Pega o nome dentro do container de ator, evitando texto de acessibilidade duplicado
+            nome_locator = card.locator(".update-components-actor__title span[dir='ltr'] span[aria-hidden='true']").first
+            
+            # Fallback de segurança 
+            if nome_locator.count() == 0:
+                nome_locator = card.locator(".update-components-actor__title .hoverable-link-text").first
+                
+            if nome_locator.count() > 0:
+                nome_limpo = nome_locator.inner_text().strip()
+            else:
+                continue
 
-        linhas = [linha.strip() for linha in texto_card.splitlines() if linha.strip()]
-        if not linhas:
-            continue
-
-        nome_limpo = linhas[0]
+        # Validação do nome encontrado
         if not nome_limpo or nome_limpo in vistos:
             continue
 
-        texto_card_lower = texto_card.lower()
-        possui_pensamento = any(
-            termo in texto_card_lower
-            for termo in (
-                "com pensamentos",
-                "with thoughts",
-                "adicionou",
-                "comentou",
-                "comentario",
-                "comentário",
-            )
-        )
-
+        # Registro no dicionário
         garantir_pessoa(ranking_engajamento_linkedin, nome_limpo)
+        
         if possui_pensamento:
             ranking_engajamento_linkedin[nome_limpo]["compartilhamentos_com_pensamentos"] += 1
             com_pensamentos += 1
@@ -194,13 +210,17 @@ def extrair_compartilhamentos(page, ranking_engajamento_linkedin, post_url, log_
         ranking_engajamento_linkedin[nome_limpo]["urls"].add(post_url)
         vistos.add(nome_limpo)
 
+    # 5. Finalização
     log_callback(
         f"Compartilhamentos mapeados: {com_pensamentos} com pensamentos e {sem_pensamentos} sem pensamentos."
     )
+    log_callback("Abra a proxima janela de compartilhamentos e clique em Confirmar para continuar.")
+    
+    # Fecha o modal suavemente
     page.keyboard.press("Escape")
     time.sleep(1)
+    
     return True
-
 
 def extrair_comentarios(page, ranking_engajamento_linkedin, post_url, log_callback):
     try:
@@ -326,10 +346,11 @@ def salvar_relatorio(ranking_engajamento_linkedin, log_callback):
     if dados_finais:
         df = pd.DataFrame(dados_finais)
         df = df.sort_values(by="Engajamento_Total", ascending=False)
+        caminho_excel = pasta_area_trabalho() / EXCEL_FILE
         df.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
-        df.to_excel(EXCEL_FILE, index=False, engine="openpyxl")
+        df.to_excel(caminho_excel, index=False, engine="openpyxl")
         log_callback(f"SUCESSO: {len(dados_finais)} pessoas no ranking.")
-        log_callback(f"Arquivos gerados: {CSV_FILE} e {EXCEL_FILE}")
+        log_callback(f"Arquivos gerados: {CSV_FILE} (pasta do projeto) e {caminho_excel.resolve()} (Excel na area de trabalho)")
     else:
         log_callback("Nenhum dado de engajamento foi coletado.")
 
@@ -351,7 +372,6 @@ def sessao_linkedin_ativa(page):
         except Exception:
             continue
     return False
-
 
 class LinkedInRunner:
     def __init__(self, log_callback, waiting_callback, finished_callback, stage_callback=None):
@@ -448,7 +468,7 @@ class LinkedInRunner:
                     precisa_logar = True
 
                 if precisa_logar:
-                    self.log_callback("LinkedIn pediu login. Faca login no Chrome.")
+                    self.log_callback("LinkedIn pediu login. Faca login no Chrome. Ao finalizar, clique em 'Confirmar'.")
                     page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
                     if not self._wait_for_confirm("Depois de logar e o feed carregar, clique em 'Confirmar'."):
                         return

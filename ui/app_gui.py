@@ -1,7 +1,8 @@
+import os
+import sys
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 import tksvg
-
 from instagram.instagram import InstagramRunner
 from linkedin.linkedin import LinkedInRunner
 
@@ -187,6 +188,13 @@ class AppGUI:
         self._build_automation_page()
         self.show_main_page()
 
+    def resource_path(self, relative_path):
+        try:
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+        return os.path.join(base_path, relative_path)
+
     def _build_main_page(self):
         tk.Label(self.main_frame, text="Aplicativos", font=("Segoe UI", 18, "bold")).pack(anchor="w")
         tk.Label(
@@ -210,7 +218,9 @@ class AppGUI:
             font=("Segoe UI", 18, "bold"),
         ).grid(row=0, column=0, padx=(0, 14), pady=8, sticky="w")
 
-        self.ig_icon = tksvg.SvgImage(file="ui/assets/logo_instagram.svg", scaletowidth=40)
+        caminho_logo = self.resource_path("ui/assets/logo_instagram.svg")
+        self.ig_icon = tksvg.SvgImage(file=caminho_logo, scaletowidth=40)
+
         RoundedButton(
             cards,
             image=self.ig_icon,
