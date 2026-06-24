@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
-from paths_utils import pasta_area_trabalho
+from paths_utils import caminho_estado_sessao, pasta_area_trabalho
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
@@ -15,8 +15,8 @@ EXCEL_FILE = "ranking_engajamento_instagram.xlsx"
 POSTS_JSON_FILE = "ranking_engajamento_instagram_por_post.json"
 SHEET_RANKING = "Ranking"
 SHEET_POR_POST = "PorPost"
-CSV_FILE = "ranking_engajamento_instagram.csv"
-STORAGE_STATE = Path("instagram_state.json")
+# CSV_FILE = "ranking_engajamento_instagram.csv"
+STORAGE_STATE = caminho_estado_sessao("instagram_state.json")
 
 _RE_SHORTCODE_INSTAGRAM = re.compile(
     r"(?:instagram\.com/)(?:p|reels?|tv)/([A-Za-z0-9_-]+)", re.IGNORECASE
@@ -598,7 +598,7 @@ def salvar_relatorio(por_post: dict, log_callback):
         df = df.sort_values(by="Engajamento_Total", ascending=False)
         caminho_excel = caminho_excel_instagram()
         df_por_post = por_post_para_dataframe(por_post)
-        df.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
+        # df.to_csv(CSV_FILE, index=False, encoding="utf-8-sig")
         try:
             with pd.ExcelWriter(caminho_excel, engine="openpyxl") as writer:
                 df.to_excel(writer, sheet_name=SHEET_RANKING, index=False)
@@ -611,8 +611,8 @@ def salvar_relatorio(por_post: dict, log_callback):
             raise
         log_callback(f"SUCESSO: {len(dados_finais)} contas unicas no ranking agregado.")
         log_callback(
-            f"Gravado: {caminho_excel.resolve()} (folhas {SHEET_RANKING} e {SHEET_POR_POST}) "
-            f"e {CSV_FILE} na pasta do projeto."
+            f"Gravado: {caminho_excel.resolve()} (folhas {SHEET_RANKING} e {SHEET_POR_POST})."
+            # f" e {CSV_FILE} na pasta do projeto."
         )
     else:
         log_callback("Nenhum dado de engajamento foi coletado.")
@@ -748,7 +748,7 @@ class InstagramRunner:
                     browser.close()
                 browser = None
 
-            # Gera o Excel/CSV final
+            # Gera o Excel final
             por_post = reindexar_por_post_por_shortcode(por_post)
             salvar_relatorio(por_post, self.log_callback)
 
