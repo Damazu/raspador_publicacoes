@@ -6,6 +6,8 @@ O objetivo inicial era auxiliar a minha empresa a analisar o engajamento dos mem
 
 A coleta não está ligada a uma empresa específica. Depois do login, você navega no Linkedin ou Instagram até a página de posts que quiser (empresa, perfil ou feed) e confirma cada etapa na interface.
 
+**Última atualização:** maio de 2026
+
 ## O que o script gera
 
 Ao finalizar a coleta, o script cria arquivos por rede:
