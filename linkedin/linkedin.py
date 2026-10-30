@@ -306,9 +306,6 @@ def extrair_comentarios(page, ranking_engajamento_linkedin, post_url, log_callba
         # Adiciona os dados coletados no dicionário mestre
         novos_comentarios = 0
         for nome_limpo in usuarios_coletados_neste_post:
-            
-            # if nome_limpo.lower() == "empresa": continue 
-            
             garantir_pessoa(ranking_engajamento_linkedin, nome_limpo)
             ranking_engajamento_linkedin[nome_limpo]["comentarios"] += 1
             ranking_engajamento_linkedin[nome_limpo]["urls"].add(post_url)
@@ -485,11 +482,9 @@ class LinkedInRunner:
                     
                 context.storage_state(path=str(STORAGE_STATE))
 
-                # CORREÇÃO 2: Força a ida para a URL alvo APÓS o login estar confirmado
-                if "feed" not in page.url:
-                    self.log_callback("Indo para a página alvo dos posts...")
-                    page.goto(URL, wait_until="domcontentloaded")
-                    time.sleep(4)
+                self.log_callback(
+                    "Sessao pronta. Navegue ate a pagina de posts da empresa ou perfil desejado."
+                )
 
                 contador_posts = 0
                 self.log_callback(

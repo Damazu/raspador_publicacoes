@@ -1,18 +1,30 @@
 # Raspador de engajamento em redes sociais
 
-Este projeto coleta **reações** e **comentários** de posts em **redes sociais** e gera um ranking de engajamento por pessoa.
+Este projeto coleta **reações**, **comentários** e **compartilhamentos** de posts em **redes sociais** e gera um ranking de engajamento por pessoa.
+
+O objetivo inicial era auxiliar a minha empresa a analisar o engajamento dos membros com os posts. Depois de usar internamente, decidi disponibilizar o projeto para que outras empresas e pessoas usem como quiserem.
+
+A coleta não está ligada a uma empresa específica. Depois do login, você navega no Chrome até a página de posts que quiser (empresa, perfil ou feed) e confirma cada etapa na interface.
 
 ## O que o script gera
 
-Ao finalizar a coleta, o script cria estes arquivos:
+Ao finalizar a coleta, o script cria arquivos por rede:
 
-- `ranking_engajamento_com_urls.csv`
-- `ranking_engajamento.xlsx`
+**LinkedIn**
 
-Cada linha representa uma pessoa com:
+- `ranking_engajamento_linkedin.csv` (pasta do projeto)
+- `ranking_engajamento_linkedin.xlsx` (Área de Trabalho)
 
-- quantidade de reações
+**Instagram**
+
+- `ranking_engajamento_instagram.csv` (pasta do projeto)
+- `ranking_engajamento_instagram.xlsx` (Área de Trabalho)
+
+Cada linha do ranking representa uma pessoa com:
+
+- quantidade de reações/curtidas
 - quantidade de comentários
+- quantidade de compartilhamentos (LinkedIn)
 - engajamento total
 - URLs dos posts onde ela interagiu
 
@@ -126,36 +138,39 @@ Filename: "{app}\raspador_social_media.exe"; Description: "Abrir Raspador Social
 
 - `app.py`: ponto de entrada da aplicacao.
 - `ui/app_gui.py`: toda a interface grafica (telas e botoes).
-- `linkedin/linkedin.py`: logica de scraping para a integracao com uma rede social (LinkedIn).
-- `instagram/instagram.py`: logica de scraping para a integracao com outra rede social (Instagram).
+- `linkedin/linkedin.py`: logica de scraping para a integracao com o LinkedIn.
+- `instagram/instagram.py`: logica de scraping para a integracao com o Instagram.
 
 ## Interface grafica
 
-Agora o projeto abre uma tela com os aplicativos de **redes sociais**.
+O projeto abre uma tela com os aplicativos de **redes sociais**.
 
 - **LinkedIn**: disponivel
-- **Instagram**: em breve
+- **Instagram**: disponivel
 - **Facebook**: em breve
 
 ## Tutorial de uso (simples)
 
 1. Abra o app com `python app.py`.
-2. Na tela de aplicativos, escolha a **rede social** (por exemplo, **LinkedIn**).
+2. Na tela de aplicativos, escolha a **rede social** (LinkedIn ou Instagram).
 3. Clique em **Comecar** para abrir o Chrome.
 4. Se pedir login, faça login na **rede escolhida** no Chrome.
 5. Quando o feed estiver pronto, clique em **Confirmar** na interface.
-6. Abra a janela de **reacoes** de um post na **mesma rede**.
-7. Clique em **Confirmar** para coletar esse post.
-8. Repita para quantos posts quiser.
-9. Quando terminar, clique em **Sair** na interface.
+6. No Chrome, abra a **pagina de posts** da empresa, perfil ou conta que deseja coletar.
+7. Abra a janela de **reacoes/curtidas** de um post.
+8. Clique em **Confirmar** para coletar essa etapa.
+9. Siga as proximas etapas do mesmo post (comentarios e, no LinkedIn, compartilhamentos).
+10. Repita para quantos posts quiser.
+11. Quando terminar, clique em **Finalizar** na interface.
 
-Pronto: os arquivos CSV e Excel serao gerados na pasta do projeto.
+Pronto: os arquivos CSV e Excel serao gerados.
 
 ## Dicas rápidas
 
+- A coleta vale para qualquer pagina a que sua conta tenha acesso. Nao e necessario alterar codigo para trocar de empresa ou perfil.
 - Se o script não encontrar a janela de reações, abra novamente essa janela na **rede em uso** e tente de novo.
 - Na primeira execução, pode demorar um pouco por causa de instalação/configuração do navegador do Playwright.
-- Arquivos como `linkedin_state.json` guardam a sessão da **rede correspondente** para evitar login em toda execução.
+- Arquivos como `linkedin_state.json` e `instagram_state.json` guardam a sessão da **rede correspondente** para evitar login em toda execução.
 - Ao distribuir para outra maquina, valide se o antivirus/SmartScreen nao bloqueou o executavel.
 
 ## Problemas comuns

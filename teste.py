@@ -44,7 +44,7 @@ def realizar_login(page, context, url_destino):
         
         time.sleep(5) 
         
-        print("Indo para a página da empresa...")
+        print("Indo para o feed do LinkedIn...")
         try:
             page.goto(url_destino, wait_until="domcontentloaded")
         except Exception:

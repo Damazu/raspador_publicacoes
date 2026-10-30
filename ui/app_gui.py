@@ -337,7 +337,7 @@ class AppGUI:
         if platform == "linkedin":
             self.current_runner = self.linkedin_runner
             self.page_title_var.set("LinkedIn - Coleta de Engajamento")
-            self.waiting_var.set("Clique em 'Comecar' para abrir o LinkedIn.")
+            self.waiting_var.set("Clique em 'Comecar' para abrir o LinkedIn. Depois, va ate a pagina de posts desejada.")
         elif platform == "instagram":
             self.current_runner = self.instagram_runner
             self.page_title_var.set("Instagram - Fluxo Inicial de Curtidas")
