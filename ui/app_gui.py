@@ -233,18 +233,6 @@ class AppGUI:
             font=("Segoe UI Symbol", 18, "bold"),
         ).grid(row=0, column=1, padx=14, pady=8, sticky="w")
 
-        RoundedButton(
-            cards,
-            text="f\nEm breve",
-            command=lambda: None,
-            state="disabled",
-            width=190,
-            height=84,
-            radius=22,
-            bg="#8C959F",
-            font=("Segoe UI", 18, "bold"),
-        ).grid(row=0, column=2, padx=14, pady=8, sticky="w")
-
     def _build_automation_page(self):
         top = tk.Frame(self.automation_frame)
         top.pack(fill="x")

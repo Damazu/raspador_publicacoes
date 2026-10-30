@@ -4,7 +4,7 @@ Este projeto coleta **reações**, **comentários** e **compartilhamentos** de p
 
 O objetivo inicial era auxiliar a minha empresa a analisar o engajamento dos membros com os posts. Depois de usar internamente, decidi disponibilizar o projeto para que outras empresas e pessoas usem como quiserem.
 
-A coleta não está ligada a uma empresa específica. Depois do login, você navega no Chrome até a página de posts que quiser (empresa, perfil ou feed) e confirma cada etapa na interface.
+A coleta não está ligada a uma empresa específica. Depois do login, você navega no Linkedin ou Instagram até a página de posts que quiser (empresa, perfil ou feed) e confirma cada etapa na interface.
 
 ## O que o script gera
 
@@ -147,7 +147,6 @@ O projeto abre uma tela com os aplicativos de **redes sociais**.
 
 - **LinkedIn**: disponivel
 - **Instagram**: disponivel
-- **Facebook**: em breve
 
 ## Tutorial de uso (simples)
 
